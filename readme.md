@@ -5,19 +5,20 @@ Welcome to the official course repository for **Agent Engineering Bootcamp: Deve
 This repo is for **anyone** and contains all code, exercises, templates, and project materials used throughout the course.
 
 **What makes this different?**
-A structured 4-part journey from deployment efficiency to validated action. Master the complete agentic systems stack: LLM optimization, hybrid memory models (RAG + Knowledge Graphs), ReAct agents with orchestration, and production-grade evaluation frameworks. Build AI systems that are fast, intelligent, safe, and production-ready.
+A structured 4-part journey from deployment efficiency to validated action. Master the complete agentic systems stack: Agent Harness and ReAct orchestration, LLM optimization, hybrid memory models (RAG + Knowledge Graphs), and production-grade evaluation frameworks. Build agentic systems that are reliable, observable, fast, safe, and production-ready.
 
 🔗 [Visit course page](https://maven.com/boring-bot/advanced-llm) • 💾 [Save $200 with code 200OFF](https://maven.com/boring-bot/advanced-llm?promoCode=200OFF)
 
 ---
-<img width="2752" height="1536" alt="unnamed-3" src="https://github.com/user-attachments/assets/a206c511-5e8b-42ce-abc2-f8e36f87861d" />
+<img width="2752" height="auto" alt="unnamed-3" src="assets/image.png" />
 
 
 ## Quick Links
 
 ### Course Structure: From Efficiency to Action
 
-- [Part 1: Deployment & Efficiency](#part-1-deployment--efficiency)
+- [Module 1: The Agent Loop](#part-1-deployment--efficiency)
+- [Module 2: LLM Quantization and KV Caching](#part-1-deployment--efficiency)
 - [Part 2: Retrieval & Memory](#part-2-retrieval--memory)
 - [Part 3: Acting & Control](#part-3-acting--control)
 - [Part 4: Evals as Engineering Discipline](#part-4-evals-as-engineering-discipline)
@@ -46,10 +47,10 @@ If you'd like to deepen your understanding of building LLM applications, refer t
 ## Cloning the Repository (Optional)
 
 ```bash
-git clone https://github.com/yourusername/enterprise-rag-agents.git
-cd enterprise-rag-agents
-python3 -m venv venv
-source venv/bin/activate
+git clone https://github.com/hamzafarooq/multi-agent-course.git
+cd multi-agent-course
+python3 -m venv .venv
+source .venv/bin/activate
 ```
 
 ## Course Curriculum
