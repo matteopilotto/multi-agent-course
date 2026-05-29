@@ -55,7 +55,7 @@ This repo is also set up to be **read and used with [Claude](https://claude.com/
 ### Clone locally (optional)
 
 ```bash
-git clone https://github.com/rkarmaka/multi-agent-course.git
+git clone https://github.com/hamzafarooq/multi-agent-course.git
 cd multi-agent-course
 python3 -m venv .venv
 source .venv/bin/activate
