@@ -30,7 +30,7 @@ file fully before responding to anything course-related.
 The course runs in this order — six modules, "from efficiency to action":
 
 1. `Module_1_Agent_Loop` — The agent loop, ReAct, and what a production harness adds on top of a bare loop.
-2. `Module_2_Quantization_and_KV_Caching` (+ `Module_2_Speculative_Decoding_from_scratch`) — LLM quantization, KV caching, and speculative decoding for fast, cheap inference.
+2. `Module_2_Skills_Sub_Agents` — Skills, subagents, and the orchestrator pattern for multi-agent systems; defining subagents in `.claude/agents/`, specialization, failure modes, and the Sprint Zero capstone.
 3. `Module_3_Agentic_RAG` — Agentic RAG, semantic caching, and Knowledge Graphs for hybrid memory.
 4. `Module_4_Voice_Agents` — Voice agents: the STT → LLM → TTS stack, turn-taking, and latency budgeting.
 5. `Module_5_Multi_Agents` — Multi-agent coordination and the protocol layer: MCP, A2A, and ADK.
@@ -44,9 +44,9 @@ live in that module's `study-material/` subfolder, alongside the module's suppor
 files and pull in the supporting material for hands-on work. Copy `modules/_TEMPLATE/` (whose
 five files become the module's `study-material/`) when adding a new module.
 
-> Note: only `Module_1_Agent_Loop` currently has the full `study-material/` set. The other
-> modules so far contain only supporting material (notebooks, code, READMEs); their teaching
-> files still need to be authored.
+> Note: `Module_1_Agent_Loop` and `Module_2_Skills_Sub_Agents` currently have the full
+> `study-material/` set. The other modules so far contain only supporting material (notebooks,
+> code, READMEs); their teaching files still need to be authored.
 
 ## Teaching style
 

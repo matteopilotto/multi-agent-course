@@ -15,7 +15,7 @@ This repo contains all the code, notebooks, exercises, and project materials use
 **Course modules** (in teaching order):
 
 1. [Module 1 — The Agent Loop, ReAct & the Harness](#module-1--the-agent-loop-react--the-harness)
-2. [Module 2 — LLM Quantization, KV Caching & Speculative Decoding](#module-2--llm-quantization-kv-caching--speculative-decoding)
+2. [Module 2 — Skills, Subagents & Multi-Agent Orchestration](#module-2--skills-subagents--multi-agent-orchestration)
 3. [Module 3 — Agentic RAG, Semantic Cache & Knowledge Graphs](#module-3--agentic-rag-semantic-cache--knowledge-graphs)
 4. [Module 4 — Voice Agents](#module-4--voice-agents)
 5. [Module 5 — Multi-Agent Systems (MCP · A2A · ADK)](#module-5--multi-agent-systems-mcp--a2a--adk)
@@ -48,7 +48,7 @@ This repo is also set up to be **read and used with [Claude](https://claude.com/
 |-------|--------------|------------|
 | `teach-module` | Runs an interactive lesson for a module, one concept at a time | *"Teach me module 3"* |
 | `quiz-me` | Quizzes you and tracks weak spots (never reveals answers first) | *"Quiz me on RAG"* |
-| `explain-eli5` | Re-explains a concept as simply as possible, with analogies | *"Explain KV caching like I'm five"* |
+| `explain-eli5` | Re-explains a concept as simply as possible, with analogies | *"Explain isolated context like I'm five"* |
 | `build-along` | Guides you through a hands-on exercise step by step | *"Let's do the build-along for module 1"* |
 | `warmup` | A ~15-min pre-class refresher: recaps the last module, previews the next | *"I have class soon — warm me up for module 2"* |
 
@@ -93,11 +93,13 @@ Demystify what an agent actually is: the perceive → reason → act loop, the *
 
 ---
 
-### Module 2 — LLM Quantization, KV Caching & Speculative Decoding
+### Module 2 — Skills, Subagents & Multi-Agent Orchestration
 
-Make the agent loop fast and cheap enough to ship. Understand where latency really comes from and how to cut it.
+Go from *one* agent doing one thing well to a *coordinated system* of agents. Learn why isolated context windows are the whole point, the orchestrator + subagents pattern, and how to define your own subagents — then watch the pattern run end to end in **Sprint Zero**.
 
-**Key topics:** quantization methods (4-bit / 8-bit, FP4 vs. NF4) · KV caching · speculative decoding · inference metrics (TTFT, ITL, throughput) · local vs. cloud hosting
+**Key topics:** agents vs. subagents · isolated context windows · the orchestrator pattern (sequential vs. parallel) · defining subagents in `.claude/agents/` · specialization & the shared-spec coordination layer · multi-agent failure modes · the Sprint Zero capstone
+
+**📦 Featured project: [Sprint Zero](#sprint-zero--a-multi-agent-product-team-in-your-terminal)** — the module's capstone: a multi-agent system that turns a product URL and three answers into six spec docs and a working full-stack app.
 
 
 ---
