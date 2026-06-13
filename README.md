@@ -136,6 +136,8 @@ Treat retrieval as a tool the agent *decides* to use — not a static bolt-on. A
 
 > 🗺️ **New here?** [Module 3 at a glance](modules/Module_3_Agentic_RAG/README.md#module-3-at-a-glance) — a one-screen map of the four pieces below.
 
+![Module 3 mind map — Agentic RAG, Semantic Cache, Knowledge Graphs, and Moment RAG](modules/Module_3_Agentic_RAG/module-3-mindmap.png)
+
 **📊 Featured project: RAG vs. Knowledge Graph comparison framework** — a Streamlit app that objectively compares RAG and KG approaches with LLM-based evaluation and interactive graph visualizations.
 [View documentation →](modules/Module_3_Agentic_RAG/Knowledge_Graphs/README.md)
 

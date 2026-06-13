@@ -6,6 +6,14 @@ By the end of this module you will have built a full agentic RAG pipeline from s
 
 ## Module 3 at a glance
 
+![Module 3 mind map — Agentic RAG, Semantic Cache, Knowledge Graphs, and Moment RAG](module-3-mindmap.png)
+
+Four moves toward **hybrid memory**: make retrieval **think** (Agentic RAG), make it **fast**
+(Semantic Cache), make it **structured** (Knowledge Graphs), and make it **land on the exact
+moment** (Moment RAG). Each is one folder below.
+
+<details><summary>Text version</summary>
+
 ```text
 MODULE 3 — Agentic RAG, Semantic Cache & Knowledge Graphs
 │
@@ -13,33 +21,6 @@ MODULE 3 — Agentic RAG, Semantic Cache & Knowledge Graphs
 ├─ ② Semantic Cache     FAISS answer reuse · time-sensitivity guard · ~0.1s hits
 ├─ ③ Knowledge Graphs   Neo4j + text-to-Cypher · RAG vs KG · LLM judge
 └─ ④ Moment RAG ✦ NEW   decompose + HyDE + RRF · cross-encoder re-rank · click-to-play citations
-```
-
-Four moves toward **hybrid memory**: make retrieval **think** (Agentic RAG), make it **fast**
-(Semantic Cache), make it **structured** (Knowledge Graphs), and make it **land on the exact
-moment** (Moment RAG). Each is one folder below.
-
-<details><summary>Same map as a diagram (Mermaid)</summary>
-
-```mermaid
-mindmap
-  root((Module 3))
-    Agentic RAG
-      Query router LLM
-      Qdrant search
-      Cited generation
-    Semantic Cache
-      FAISS answer reuse
-      Time-sensitivity guard
-      ~0.1s hits
-    Knowledge Graphs
-      Neo4j + text-to-Cypher
-      RAG vs KG
-      LLM judge
-    Moment RAG ✦ NEW
-      Decompose + HyDE + RRF
-      Cross-encoder re-rank
-      Click-to-play citations
 ```
 </details>
 
