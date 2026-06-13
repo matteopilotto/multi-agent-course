@@ -4,8 +4,45 @@ This module teaches you how to build intelligent Retrieval-Augmented Generation 
 
 By the end of this module you will have built a full agentic RAG pipeline from scratch, without relying on any external agentic framework.
 
-> **🗺️ Start here:** open [`module-3-mindmap.html`](module-3-mindmap.html) for a one-glance map of everything in this module.
->
+## Module 3 at a glance
+
+```text
+MODULE 3 — Agentic RAG, Semantic Cache & Knowledge Graphs
+│
+├─ ① Agentic RAG        router (LLM) → Qdrant search → cited generation
+├─ ② Semantic Cache     FAISS answer reuse · time-sensitivity guard · ~0.1s hits
+├─ ③ Knowledge Graphs   Neo4j + text-to-Cypher · RAG vs KG · LLM judge
+└─ ④ Moment RAG ✦ NEW   decompose + HyDE + RRF · cross-encoder re-rank · click-to-play citations
+```
+
+Four moves toward **hybrid memory**: make retrieval **think** (Agentic RAG), make it **fast**
+(Semantic Cache), make it **structured** (Knowledge Graphs), and make it **land on the exact
+moment** (Moment RAG). Each is one folder below.
+
+<details><summary>Same map as a diagram (Mermaid)</summary>
+
+```mermaid
+mindmap
+  root((Module 3))
+    Agentic RAG
+      Query router LLM
+      Qdrant search
+      Cited generation
+    Semantic Cache
+      FAISS answer reuse
+      Time-sensitivity guard
+      ~0.1s hits
+    Knowledge Graphs
+      Neo4j + text-to-Cypher
+      RAG vs KG
+      LLM judge
+    Moment RAG ✦ NEW
+      Decompose + HyDE + RRF
+      Cross-encoder re-rank
+      Click-to-play citations
+```
+</details>
+
 > **✦ Latest addition — [`Moment_RAG/`](Moment_RAG/):** agentic RAG on *video*. Ask a complex question and get a streamed, cited answer where each citation pops up the source YouTube episode at the **exact moment**, with a synced transcript. It's decompose → hybrid retrieve (dense + BM25 + HyDE questions, RRF) → cross-encoder re-rank → cited synthesis. See the [Moment RAG README](Moment_RAG/README.md).
 
 ---

@@ -42,7 +42,7 @@ Welcome to the official course repository for **Agent Engineering Bootcamp: Deve
 |---|--------|--------------|----------|
 | 1️⃣ | **The Agent Loop, ReAct & the Harness** | What an agent *actually* is | A ReAct agent from scratch |
 | 2️⃣ | **Skills, Subagents & Orchestration** | One agent → a coordinated system | **Sprint Zero** — a multi-agent app builder |
-| 3️⃣ | **Agentic RAG, Semantic Cache & KGs** | Retrieval as a tool the agent chooses | A RAG-vs-KG evaluation app |
+| 3️⃣ | **Agentic RAG, Semantic Cache & KGs** | Retrieval as a tool the agent chooses | A RAG-vs-KG eval app + a cited video-moment RAG |
 | 4️⃣ | **Evaluation & Guardrails** | Ship with proof, not hope | An eval + guardrail harness |
 | 5️⃣ | **Multi-Agent Systems (MCP · A2A · ADK)** | When many agents beat one | A coordinated multi-agent system |
 | 6️⃣ | **Voice Agents & LLM Optimization** | An agent that talks — fast and cheap | A real-time voice agent |
@@ -132,8 +132,9 @@ Go from *one* agent doing one thing well to a *coordinated system* of agents. Le
 
 Treat retrieval as a tool the agent *decides* to use — not a static bolt-on. Add a semantic cache for real latency/cost wins, and contrast vector RAG with Knowledge Graphs for structured reasoning.
 
-**Key topics:** naive RAG vs. agentic RAG · query routing & multi-hop retrieval · semantic caching · Knowledge Graphs & GraphRAG · text-to-Cypher · RAG vs. KG evaluation
+**Key topics:** naive RAG vs. agentic RAG · query routing & multi-hop retrieval · query decomposition + HyDE · hybrid retrieval & RRF fusion · cross-encoder re-ranking · semantic caching · Knowledge Graphs & GraphRAG · text-to-Cypher · RAG vs. KG evaluation · moment-level video RAG
 
+> 🗺️ **New here?** [Module 3 at a glance](modules/Module_3_Agentic_RAG/README.md#module-3-at-a-glance) — a one-screen map of the four pieces below.
 
 **📊 Featured project: RAG vs. Knowledge Graph comparison framework** — a Streamlit app that objectively compares RAG and KG approaches with LLM-based evaluation and interactive graph visualizations.
 [View documentation →](modules/Module_3_Agentic_RAG/Knowledge_Graphs/README.md)
@@ -142,6 +143,16 @@ Treat retrieval as a tool the agent *decides* to use — not a static bolt-on. A
 cd modules/Module_3_Agentic_RAG/Knowledge_Graphs
 python setup.py      # one-time setup
 streamlit run app.py
+```
+
+**🎬 Featured project: Moment RAG** — agentic RAG on *video*. Ask a complex question and get a streamed, **cited** answer where every citation pops up the source YouTube episode at the **exact moment**, with a synced transcript. Pipeline: self-query → decompose → hybrid retrieve (dense + BM25 + HyDE questions, RRF) → cross-encoder re-rank → cited synthesis.
+[View documentation →](modules/Module_3_Agentic_RAG/Moment_RAG/README.md)
+
+```bash
+cd modules/Module_3_Agentic_RAG/Moment_RAG
+pip install -r requirements.txt
+cp .env.example .env      # add OPENAI_API_KEY
+uvicorn app:app --reload  # open http://localhost:8000
 ```
 
 ---
@@ -184,6 +195,7 @@ This course goes beyond theory. Across the six modules you'll ship real, portfol
 | 🤝 **Sprint Zero** — multi-agent app builder | You can orchestrate specialized subagents to a shared spec |
 | 🔎 **Agentic RAG pipeline** with semantic cache | Retrieval as a decision, with real latency/cost wins |
 | 🕸️ **Knowledge Graph app** + RAG-vs-KG eval | You can pick the right memory for the job and measure it |
+| 🎬 **Moment RAG** — cited answers over video | Retrieval resolves to the exact moment you cite, not just a doc |
 | 🎙️ **Voice agent** that handles real conversation | You can budget latency and survive barge-in |
 | ⚡ **Optimized LLM deployment** | Quantization, KV caching, speculative decoding |
 | ✅ **Evaluation + guardrail harness** | You ship with measurable quality and safety |
