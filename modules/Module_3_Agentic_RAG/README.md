@@ -1,8 +1,8 @@
 # Module 3: Agentic RAG
 
-This module teaches you how to build intelligent Retrieval-Augmented Generation (RAG) systems that **reason before they retrieve**. Rather than routing every query through a single static pipeline, you'll learn how to give your RAG system *agency* — the ability to choose the right knowledge source, optimize for speed with semantic caching, and handle time-sensitive queries with live web search.
+This module teaches you how to build intelligent Retrieval-Augmented Generation (RAG) systems that **reason before they retrieve**. Rather than routing every query through a single static pipeline, you'll learn how to give your RAG system *agency* — the ability to choose the right knowledge source, optimize for speed with semantic caching, and handle time-sensitive queries with live web search. You'll also explore **Knowledge Graphs** as a structured retrieval backend and learn when graph-based retrieval beats vector search — the foundation of hybrid memory.
 
-By the end of this module you will have built a full agentic RAG pipeline from scratch, without relying on any external agentic framework.
+By the end of this module you will have built a full agentic RAG pipeline from scratch, plus a RAG-vs-Knowledge-Graph evaluation framework — all without relying on any external agentic framework (no LangChain, no LlamaIndex).
 
 ---
 
@@ -13,6 +13,8 @@ By the end of this module you will have built a full agentic RAG pipeline from s
 - How **semantic caching** works and why it dramatically reduces latency and cost
 - How to detect and handle **time-sensitive queries** that must never be served from cache
 - How to combine document retrieval, vector search, and live web search into one coherent pipeline
+- How to build a **Knowledge Graph** in Neo4j and query it with **Text-to-Cypher** instead of vector search
+- How to objectively compare RAG vs Knowledge Graph answers with an **LLM-as-judge** evaluation framework
 
 ---
 
@@ -32,10 +34,20 @@ Module_3_Agentic_RAG/
 ├── Semantic_Cache/
 │   └── Semantic_cache_from_scratch.ipynb     # Build a semantic cache from the ground up
 │
+├── Knowledge_Graphs/                         # Structured retrieval track — RAG vs Knowledge Graph
+│   ├── knowledge_graph_neo4j_with_evals.ipynb  # RAG vs KG comparison + LLM-judge evaluation
+│   ├── knowledge_graph_rag_comparison.py     # Core implementation (Neo4j + Text-to-Cypher)
+│   ├── app.py / streamlit_helper.py          # Streamlit app with interactive graph visualizations
+│   ├── setup.py / sample_questions.py        # First-time data load + sample question sets
+│   ├── requirements.txt                      # KG-specific dependencies (Neo4j, Pyvis, Streamlit…)
+│   └── Knowledge_Graphs/
+│       ├── Knowledge_Graphs_Basic_Version.ipynb     # Graph RAG fundamentals (hotel reviews)
+│       └── Knowledge_Graphs_Advanced_Version.ipynb  # Graph enrichment + vector indexing
+│
 ├── rag_helpers.py                            # Shared helpers — all pipeline logic for notebook 4
 ├── Agentic_RAG_with_Semantic_Cache.ipynb     # Combined: agentic RAG + semantic cache (minimal notebook)
 │
-└── .env                                      # API keys (OpenAI, SerpApi, Traversaal Pro)
+└── .env                                      # API keys (OpenAI, SerpApi, Traversaal Pro, Neo4j)
 ```
 
 ---
@@ -230,6 +242,34 @@ User Query
 
 ---
 
+### 5. Knowledge Graphs
+
+**`Knowledge_Graphs/`**
+
+A parallel track that swaps vector search for **structured graph retrieval**. Where the agentic RAG notebooks embed text and search by similarity, here you build a **Knowledge Graph** in Neo4j and answer questions by generating **Cypher queries** from natural language — then measure which approach wins, query by query.
+
+#### Notebooks
+
+| Notebook | What it covers |
+|---|---|
+| `knowledge_graph_neo4j_with_evals.ipynb` | The main notebook — builds RAG **and** KG pipelines from scratch, runs them side by side, and uses an **LLM judge** (GPT-4o-mini) to score each answer on accuracy, completeness, and precision. Dataset: researchers / articles / topics. |
+| `Knowledge_Graphs/Knowledge_Graphs_Basic_Version.ipynb` | Graph RAG fundamentals — construct a hotel-reviews knowledge graph, migrate it to Neo4j, and build a template-based retriever. |
+| `Knowledge_Graphs/Knowledge_Graphs_Advanced_Version.ipynb` | Extends the basic graph with **LLM-driven graph enrichment** (entity/relationship extraction from unstructured text) and **vector indexing** on graph nodes for hybrid structural + semantic retrieval. |
+
+#### Three query methods compared
+
+| Method | How it answers | Best for |
+|---|---|---|
+| **RAG** | Semantic / keyword search over documents → LLM generation | Explanations, summaries, fuzzy natural-language questions |
+| **Knowledge Graph (Text-to-Cypher)** | NL question → Cypher → query Neo4j directly | Precise counts, relationships, aggregations, filtering |
+| **LLM Judge** | GPT-4o-mini scores both answers and recommends a winner | Deciding *when to use which* — objectively |
+
+#### Streamlit app
+
+Beyond the notebooks, `Knowledge_Graphs/` ships a runnable Streamlit app (`app.py`) with side-by-side RAG-vs-KG comparison and interactive **Pyvis** graph visualizations (full graph + query-specific subgraph). Run `python setup.py` once to load data, then `streamlit run app.py`. See `Knowledge_Graphs/README.md` for the full walkthrough.
+
+---
+
 ## Key Concepts Covered
 
 | Concept | Description |
@@ -241,6 +281,10 @@ User Query
 | **Semantic caching** | Previously seen (or semantically similar) queries are answered from cache instead of hitting the API again |
 | **Time-sensitivity detection** | Keyword-based filter routes live queries to a web search API, bypassing the cache entirely |
 | **RAG with citations** | Retrieved chunks are passed to an LLM which generates grounded answers with `[1][2]`-style references |
+| **Knowledge Graph** | Entities and relationships are modeled as nodes and edges in Neo4j for structured retrieval |
+| **Text-to-Cypher** | An LLM translates a natural-language question into a Cypher query executed directly on the graph |
+| **Hybrid retrieval** | Combining structural (graph) and semantic (vector) retrieval, and choosing the right one per query |
+| **LLM-as-judge evaluation** | An impartial LLM scores RAG vs KG answers on accuracy, completeness, and precision |
 
 ---
 
@@ -251,6 +295,8 @@ User Query
 | LLM & Embeddings | `openai` (GPT-4o / GPT-4), `transformers`, `sentence_transformers`, `nomic-ai/nomic-embed-text-v1.5` |
 | Vector database | `qdrant_client` (AsyncQdrantClient) |
 | Similarity search / cache | `faiss-cpu` (IndexFlatL2) |
+| Knowledge graph | `neo4j` (Neo4j Aura), Text-to-Cypher (GPT-4o-mini) |
+| Graph visualization / app | `streamlit`, `pyvis`, `plotly` (Knowledge Graphs track) |
 | Document processing | `fitz` (PyMuPDF), `langchain_text_splitters` |
 | Async support | `asyncio`, `nest_asyncio` |
 | Web / live search | `requests`, SerpApi (Google Search API), Traversaal Pro |
@@ -268,6 +314,7 @@ User Query
 | `OPENAI_API_KEY` | Query routing and RAG generation (all notebooks) |
 | `SERP_API_KEY` | Live Google search (Agentic RAG, combined, and Semantic Cache notebooks) |
 | `traversaal_pro_api_key` | Hosted RAG over AWS Guidebook (Semantic Cache notebook only) |
+| `NEO4J_URI` / `NEO4J_USERNAME` / `NEO4J_PASSWORD` | Neo4j Aura connection (Knowledge Graphs track only) |
 
 **On Google Colab** — add keys to the Secrets panel (lock icon in the left sidebar).
 
@@ -286,12 +333,16 @@ pip install openai qdrant-client transformers sentence-transformers \
             langchain-text-splitters pymupdf einops nest_asyncio
 ```
 
+> The **Knowledge Graphs** track has its own dependencies (Neo4j, Streamlit, Pyvis, Plotly).
+> Install them separately with `pip install -r Knowledge_Graphs/requirements.txt`.
+
 ### Recommended notebook order
 
 1. `Agentic_RAG/Agentic_RAG_Notebook.ipynb` — start here to understand the routing architecture
 2. `Agentic_RAG/Upload_data_to_Qdrant_Notebook.ipynb` — optional, only if you want to rebuild the vector index
 3. `Semantic_Cache/Semantic_cache_from_scratch.ipynb` — understand caching mechanics in isolation
 4. `Agentic_RAG_with_Semantic_Cache.ipynb` — the complete combined system
+5. `Knowledge_Graphs/knowledge_graph_neo4j_with_evals.ipynb` — structured retrieval: RAG vs Knowledge Graph (independent track; needs a Neo4j Aura instance)
 
 ---
 
