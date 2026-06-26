@@ -165,6 +165,10 @@ Close the loop: ship with measurable quality and safety, not hope.
 
 **Key topics:** input/output guardrails · prompt-injection & jailbreak defense (Llama Guard) · trajectory eval vs. outcome eval · LLM-as-judge (and how to validate the judge) · golden task sets
 
+> 🗺️ **New here?** [Module 4 overview](modules/Module_4_AI_Evaluation/README.md) — the five-layer eval pyramid, from "is the answer good?" up to "can we trust the system end-to-end?"
+
+**📏 Featured notebook: AI Evaluation Metrics** — a plain-English tour of the metrics used across every layer of an AI system: LLM quality & reasoning, RAG retrieval & generation, and full agent/multi-agent evaluation. No API keys, no model downloads — just the standard library doing the arithmetic so you can watch the numbers move.
+[View documentation →](modules/Module_4_AI_Evaluation/README.md) · [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/hamzafarooq/multi-agent-course/blob/main/modules/Module_4_AI_Evaluation/AI_Eval_Metrics.ipynb)
 
 ---
 
