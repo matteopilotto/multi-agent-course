@@ -41,6 +41,7 @@ agents stop being standalone chatbots and start coordinating as a system.
 Module_5_Multi_Agents/
 │
 ├── how_skills_work_under_the_hood.ipynb               # Notebook: skills, demystified, on the Anthropic SDK
+├── agent_subagent_orchestrator_starter.ipynb          # Notebook: agent → sub-agents → orchestrator on the Anthropic SDK
 │
 └── advance-customer-support-agent-feature-A2A-MCP-ADK/   # Hands-on capstone project
     ├── cs_agent/          # The agent package — ADK agents, A2A infra, security pipeline
