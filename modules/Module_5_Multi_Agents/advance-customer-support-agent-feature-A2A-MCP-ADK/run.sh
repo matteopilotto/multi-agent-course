@@ -345,9 +345,12 @@ cmd_setup() {
 # Use Google AI Studio API key (NOT Vertex). Leave GOOGLE_GENAI_USE_VERTEXAI unset.
 PYTHONWARNINGS=ignore
 
-# REQUIRED — fill these in:
-GOOGLE_API_KEY=        # aistudio.google.com/apikey
-MEM0_API_KEY=          # app.mem0.ai
+# REQUIRED — fill these in. Do NOT put a "# comment" after the value on the same line:
+# dotenv treats it as part of the key. Keep notes on their own line, like these.
+# GOOGLE_API_KEY: get it from https://aistudio.google.com/apikey
+GOOGLE_API_KEY=
+# MEM0_API_KEY: get it from https://app.mem0.ai  (looks like m0-...)
+MEM0_API_KEY=
 
 # Optional (PII masking via Google Cloud DLP, input scan via Model Armor).
 # Leave blank to run fully local — masking degrades to a no-op.
