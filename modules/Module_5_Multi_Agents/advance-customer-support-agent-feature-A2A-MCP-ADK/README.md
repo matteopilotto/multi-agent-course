@@ -169,6 +169,7 @@ drops you straight into the agent CLI. From the project root:
 
 ```bash
 ./run.sh            # PostgreSQL → MCP Toolbox → A2A servers → agent CLI
+./run.sh web        # same stack, but a Perplexity-style web UI at http://127.0.0.1:8000
 ```
 
 It health-checks each service before launching the next, and tears the background services
@@ -176,6 +177,7 @@ down automatically when you exit the CLI (Ctrl-C). Other subcommands:
 
 ```bash
 ./run.sh setup      # one-time: create env, install deps + Postgres, init DB, seed, write .env
+./run.sh web        # serve the web UI instead of the terminal CLI
 ./run.sh stop       # stop background services (Toolbox, A2A, Postgres)
 ./run.sh status     # show what's up
 ./run.sh seed       # re-seed the database to a known state

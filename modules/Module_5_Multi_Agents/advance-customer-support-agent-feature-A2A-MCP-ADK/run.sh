@@ -4,6 +4,7 @@
 #
 #   ./run.sh setup     # one-time: install Postgres + extra deps, init DB, seed, write .env
 #   ./run.sh           # start everything (Postgres -> MCP Toolbox -> A2A servers -> agent CLI)
+#   ./run.sh web       # same stack, but serve the Perplexity-style web UI (http://127.0.0.1:8000)
 #   ./run.sh stop      # stop background services (Toolbox, A2A, Postgres)
 #   ./run.sh status     # show what's running
 #   ./run.sh seed       # re-seed the database from mcp_toolbox/seed.sql
@@ -45,6 +46,7 @@ TOOLBOX_PORT="5000"
 TOOLBOX_PKG="@toolbox-sdk/server@1.5.0"
 JUDGE_PORT="10002"
 MASK_PORT="10003"
+WEB_PORT="${WEB_PORT:-8000}"
 
 RUN_DIR="$PROJECT_DIR/.run"
 mkdir -p "$RUN_DIR"
@@ -69,7 +71,15 @@ activate_env() {
   conda activate "$ENV_NAME"
   # AI Studio key path: Vertex must be OFF, regardless of stray shell exports.
   unset GOOGLE_GENAI_USE_VERTEXAI || true
+  export PYTHONWARNINGS="${PYTHONWARNINGS:-ignore}"
+  export GRPC_VERBOSITY="${GRPC_VERBOSITY:-ERROR}"
+  export GLOG_minloglevel="${GLOG_minloglevel:-2}"
 }
+
+# Regex of harmless import-time noise to strip from the CLI's stderr. PYTHONWARNINGS
+# alone doesn't catch these because the google-adk import chain resets the warnings
+# filter. Real errors/tracebacks don't match these patterns and still pass through.
+WARN_FILTER='DeprecationWarning|PydanticDeprecated|json_encoders|warnings\.warn|warn_deprecated|pyasn1|ldap3|typeMap is deprecated|MCPServerStreamableHTTP|alembic|path_separator|migration|errors\.pydantic|AiohttpClientSession|aiohttp\.ClientSession|type: ignore'
 
 pg_running() { pg_isready -h "$PGHOST" -p "$PGPORT" >/dev/null 2>&1; }
 
@@ -405,11 +415,11 @@ stop_bg() {
   kill_port "$TOOLBOX_PORT"; kill_port "$JUDGE_PORT"; kill_port "$MASK_PORT"
 }
 
-cmd_start() {
+# Bring up Postgres + MCP Toolbox + A2A servers (shared by `start` and `web`).
+start_services() {
   activate_env
   [ -f "$PROJECT_DIR/.env" ] || die "No .env. Run: ./run.sh setup"
   check_env_keys
-
   ensure_config_files
   start_postgres
 
@@ -432,13 +442,28 @@ cmd_start() {
   wait_for "http://localhost:$MASK_PORT/.well-known/agent.json" "Data Masker" 40 \
     || die "Mask A2A server did not come up — see $A2A_LOG"
 
-  # Tear down background services when the CLI exits.
+  # Tear down background services when the foreground process exits.
   trap 'echo; say "Shutting down services"; stop_bg; ok "stopped"' EXIT INT TERM
+}
 
+cmd_start() {
+  start_services
   echo
   say "Launching agent CLI (Phoenix UI will open at http://localhost:6006)"
   echo "----------------------------------------------------------------------"
-  ( cd "$PROJECT_DIR/cs_agent" && python agent_cli.py )
+  # Filter harmless deprecation noise from stderr; keep stdin/stdout interactive
+  # and let any real error through (it won't match WARN_FILTER).
+  ( cd "$PROJECT_DIR/cs_agent" && python agent_cli.py \
+      2> >(grep --line-buffered -vE "$WARN_FILTER" >&2) )
+}
+
+cmd_web() {
+  start_services
+  echo
+  say "Launching web UI at http://127.0.0.1:$WEB_PORT  (Phoenix at http://localhost:6006)"
+  echo "----------------------------------------------------------------------"
+  ( cd "$PROJECT_DIR" && WEB_PORT="$WEB_PORT" python -m cs_agent.web \
+      2> >(grep --line-buffered -vE "$WARN_FILTER" >&2) )
 }
 
 # ---------------------------------------------------------------------------
@@ -471,9 +496,10 @@ cmd_logs() { tail -n 40 -F "$TOOLBOX_LOG" "$A2A_LOG"; }
 case "${1:-start}" in
   setup)  cmd_setup ;;
   start)  cmd_start ;;
+  web)    cmd_web ;;
   stop)   cmd_stop ;;
   status) cmd_status ;;
   seed)   cmd_seed ;;
   logs)   cmd_logs ;;
-  *) die "Unknown command '$1'. Use: setup | start | stop | status | seed | logs" ;;
+  *) die "Unknown command '$1'. Use: setup | start | web | stop | status | seed | logs" ;;
 esac

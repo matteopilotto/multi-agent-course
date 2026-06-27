@@ -47,6 +47,20 @@ A2A_JUDGE_PORT = int(os.getenv("A2A_JUDGE_PORT", "10002"))
 A2A_MASK_HOST = os.getenv("A2A_MASK_HOST", "localhost")
 A2A_MASK_PORT = int(os.getenv("A2A_MASK_PORT", "10003"))
 
+# Print each MCP tool call + result inline so the tool-use loop is visible during
+# a request (great for teaching/demos). Set CS_SHOW_TOOL_CALLS=0 to silence.
+SHOW_TOOL_CALLS = os.getenv("CS_SHOW_TOOL_CALLS", "1") == "1"
+
+
+def _fmt_tool_args(args) -> str:
+    """Render tool args as name=value pairs for inline logging."""
+    if not args:
+        return ""
+    try:
+        return ", ".join(f"{k}={v!r}" for k, v in dict(args).items())
+    except Exception:
+        return str(args)
+
 toolbox_client = ToolboxSyncClient(
     url="http://127.0.0.1:5000"
 )
@@ -365,10 +379,14 @@ async def main():
                 # Capture tool calls for observability
                 for fc in (event.get_function_calls() or []):
                     tool_calls_log.append({"name": fc.name, "args": fc.args})
+                    if SHOW_TOOL_CALLS:
+                        print(f"  \033[2m[tool] → {fc.name}({_fmt_tool_args(fc.args)})\033[0m")
 
                 for fr in (event.get_function_responses() or []):
                     resp_str = json.dumps(fr.response) if isinstance(fr.response, dict) else str(fr.response)
                     tool_results_log.append({"name": fr.name, "response": resp_str[:500]})
+                    if SHOW_TOOL_CALLS:
+                        print(f"  \033[2m[tool] ← {fr.name}: {resp_str[:300]}\033[0m")
                     with tracer.start_as_current_span(f"tool.{fr.name}") as tc_span:
                         tc_span.set_attribute(SpanAttributes.OPENINFERENCE_SPAN_KIND, "TOOL")
                         tc_span.set_attribute(SpanAttributes.TOOL_NAME, fr.name)
