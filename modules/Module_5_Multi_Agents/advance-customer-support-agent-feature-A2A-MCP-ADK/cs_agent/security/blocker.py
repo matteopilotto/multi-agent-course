@@ -204,7 +204,7 @@ class SecurityBlocker:
             r"(?:sleect|selct|selecct|slect|seelct)",
             r"(?:drp|dropp|dorp|dorpp|dop)",
             r"(?:unoin|iunon|unnion|unioon|ubion)",
-            r"(?:wher|whre|wheer|wherr|wherre)",
+            r"(?:whre|wheer|wherr|wherre)",  # typo-evasions only; 'wher' removed — it matched the English word "where"
             r"(?:udpate|updaet|updte|updatte)",
             r"(?:isner|insret|insetr|insrt)",
             r"(?:delte|deleet|deleete|delet)",

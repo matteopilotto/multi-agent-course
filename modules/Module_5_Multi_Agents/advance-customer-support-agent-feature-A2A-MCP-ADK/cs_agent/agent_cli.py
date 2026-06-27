@@ -1,5 +1,10 @@
 import warnings
 warnings.filterwarnings("ignore")
+# Robustly silence library DeprecationWarnings: the google-adk import chain resets
+# the warnings filter (defeating filterwarnings/PYTHONWARNINGS), but overriding
+# showwarning drops them at the sink. Done in-process so we never have to filter
+# stderr at the shell level — that breaks the interactive input() prompt.
+warnings.showwarning = lambda *a, **k: None
 
 import asyncio
 import json

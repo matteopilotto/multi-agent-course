@@ -451,10 +451,10 @@ cmd_start() {
   echo
   say "Launching agent CLI (Phoenix UI will open at http://localhost:6006)"
   echo "----------------------------------------------------------------------"
-  # Filter harmless deprecation noise from stderr; keep stdin/stdout interactive
-  # and let any real error through (it won't match WARN_FILTER).
-  ( cd "$PROJECT_DIR/cs_agent" && python agent_cli.py \
-      2> >(grep --line-buffered -vE "$WARN_FILTER" >&2) )
+  # Warnings are silenced in-process (agent_cli sets warnings.showwarning to a
+  # no-op). We do NOT filter stderr at the shell here: redirecting stderr makes
+  # Python's input() stop using readline, which hides the interactive prompt.
+  ( cd "$PROJECT_DIR/cs_agent" && exec python -u agent_cli.py )
 }
 
 cmd_web() {

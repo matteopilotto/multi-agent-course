@@ -10,6 +10,7 @@ Requires the same services as the CLI: Postgres, MCP Toolbox (:5000), A2A (:1000
 
 import warnings
 warnings.filterwarnings("ignore")
+warnings.showwarning = lambda *a, **k: None
 
 import json
 import logging
@@ -67,6 +68,10 @@ class ChatReq(BaseModel):
     message: str
 
 
+class LogoutReq(BaseModel):
+    user_id: str
+
+
 def _build_runner(user_id: str) -> Runner:
     agent = LlmAgent(
         model="gemini-2.5-flash",
@@ -99,7 +104,14 @@ async def login(req: LoginReq):
         return JSONResponse({"ok": False, "error": "Invalid email or password."}, status_code=401)
     uid = ctx["email"]
     _runners[uid] = _build_runner(uid)
-    await session_service.create_session(app_name="agents", user_id=uid, session_id=f"session_{uid}")
+    sid = f"session_{uid}"
+    # Make login idempotent — a repeat login (or page reload) must not 500 on a
+    # session id that already exists. Recreate it fresh.
+    try:
+        await session_service.delete_session(app_name="agents", user_id=uid, session_id=sid)
+    except Exception:
+        pass
+    await session_service.create_session(app_name="agents", user_id=uid, session_id=sid)
     return {
         "ok": True,
         "user_id": uid,
@@ -107,6 +119,17 @@ async def login(req: LoginReq):
         "is_premium": bool(ctx.get("is_premium_customer")),
         "items": ctx.get("total_items_purchased", 0),
     }
+
+
+@app.post("/api/logout")
+async def logout(req: LogoutReq):
+    _runners.pop(req.user_id, None)
+    try:
+        await session_service.delete_session(
+            app_name="agents", user_id=req.user_id, session_id=f"session_{req.user_id}")
+    except Exception:
+        pass
+    return {"ok": True}
 
 
 @app.post("/api/chat")
@@ -162,22 +185,25 @@ INDEX_HTML = r"""<!doctype html>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>Customer Support Agent</title>
-<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <style>
   :root{
-    --bg:#0f1117; --panel:#171a21; --panel-2:#1e222b; --line:#2a2f3a;
-    --text:#e8eaed; --muted:#9aa3b2; --accent:#20b8cd; --accent-2:#1aa0b4;
-    --user:#222732; --tool:#13161d;
+    --bg:#f7f8fa; --panel:#ffffff; --panel-2:#f1f3f6; --line:#e4e7ec;
+    --text:#1a1d23; --muted:#6b7280; --accent:#0f9aae; --accent-2:#0c8294;
+    --user:#eef1f6; --tool:#f4f6f9;
   }
   *{box-sizing:border-box}
+  html,body{height:100%}
   body{margin:0;font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
-       background:var(--bg);color:var(--text);height:100vh;display:flex;flex-direction:column}
+       background:var(--bg);color:var(--text);height:100vh;display:flex;flex-direction:column;overflow:hidden}
   header{padding:14px 20px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px}
   header .dot{width:9px;height:9px;border-radius:50%;background:var(--accent);box-shadow:0 0 10px var(--accent)}
   header h1{font-size:15px;font-weight:600;margin:0;letter-spacing:.2px}
   header .who{margin-left:auto;color:var(--muted);font-size:13px}
-  main{flex:1;overflow-y:auto;display:flex;justify-content:center}
-  .col{width:100%;max-width:760px;padding:24px 20px 140px}
+  header .logout{margin-left:14px;background:transparent;color:var(--muted);border:1px solid var(--line);
+       border-radius:9px;padding:5px 12px;font-size:13px;font-weight:500;cursor:pointer}
+  header .logout:hover{color:var(--text);border-color:var(--muted)}
+  main{flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch}
+  .col{width:100%;max-width:760px;margin:0 auto;padding:24px 20px 150px}
   .msg{margin:0 0 22px}
   .msg .role{font-size:12px;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);margin-bottom:6px}
   .bubble{padding:14px 16px;border-radius:14px;border:1px solid var(--line)}
@@ -187,8 +213,8 @@ INDEX_HTML = r"""<!doctype html>
   .assistant .bubble :last-child{margin-bottom:0}
   .bubble h1,.bubble h2,.bubble h3{font-size:1.05em;margin:.6em 0 .3em}
   .bubble ul,.bubble ol{margin:.3em 0;padding-left:1.3em}
-  .bubble code{background:#0c0e13;padding:2px 6px;border-radius:6px;font-size:.9em}
-  .bubble pre{background:#0c0e13;padding:12px;border-radius:10px;overflow:auto}
+  .bubble code{background:#eef1f6;padding:2px 6px;border-radius:6px;font-size:.9em}
+  .bubble pre{background:#eef1f6;padding:12px;border-radius:10px;overflow:auto}
   .steps{margin:10px 0 0;border:1px solid var(--line);border-radius:12px;background:var(--tool);overflow:hidden}
   .steps summary{cursor:pointer;padding:9px 13px;color:var(--muted);font-size:13px;user-select:none;list-style:none}
   .steps summary::-webkit-details-marker{display:none}
@@ -198,14 +224,19 @@ INDEX_HTML = r"""<!doctype html>
   .step .call{color:var(--accent)}
   .step .res{color:var(--muted);white-space:pre-wrap;word-break:break-word;margin-top:4px;
        font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
-  .blocked .bubble{border-color:#b5483f;background:#241616;color:#ffb4ac}
+  .blocked .bubble{border-color:#e0a59f;background:#fdecea;color:#a23b30}
   footer{position:fixed;bottom:0;left:0;right:0;background:linear-gradient(transparent,var(--bg) 22%);padding:18px 20px 22px}
   .inwrap{max-width:760px;margin:0 auto;display:flex;gap:10px;align-items:flex-end;
        background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:8px 8px 8px 14px}
   textarea{flex:1;resize:none;border:0;outline:0;background:transparent;color:var(--text);font:inherit;max-height:140px;padding:6px 0}
-  button{background:var(--accent);color:#06222a;border:0;border-radius:11px;padding:10px 16px;font-weight:700;cursor:pointer}
+  button{background:var(--accent);color:#ffffff;border:0;border-radius:11px;padding:10px 16px;font-weight:700;cursor:pointer}
   button:disabled{opacity:.5;cursor:default}
   .hint{max-width:760px;margin:8px auto 0;color:var(--muted);font-size:12px;text-align:center}
+  .chips{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0 0}
+  .chips .label{flex-basis:100%;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.6px;margin-bottom:2px}
+  .chip{background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:8px 14px;
+       font-size:13px;color:var(--text);cursor:pointer;transition:border-color .15s,color .15s}
+  .chip:hover{border-color:var(--accent);color:var(--accent)}
   /* login */
   .login{margin:auto;max-width:380px;width:100%;background:var(--panel);border:1px solid var(--line);
        border-radius:16px;padding:26px}
@@ -225,6 +256,7 @@ INDEX_HTML = r"""<!doctype html>
   <span class="dot"></span>
   <h1>Customer Support Agent</h1>
   <span class="who" id="who"></span>
+  <button id="logout" class="logout" style="display:none">Sign out</button>
 </header>
 
 <main>
@@ -252,14 +284,35 @@ INDEX_HTML = r"""<!doctype html>
 </footer>
 
 <script>
-marked.setOptions({breaks:true});
+// Tiny self-contained markdown renderer (no external CDN — works offline/behind CSP).
+function md(src){
+  const esc=s=>s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const inline=s=>esc(s)
+    .replace(/`([^`]+)`/g,'<code>$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>')
+    .replace(/(^|[^*])\*([^*]+)\*/g,'$1<em>$2</em>');
+  const lines=(src||'').split(/\r?\n/);
+  let html='',list=null;
+  const closeList=()=>{if(list){html+=`</${list}>`;list=null;}};
+  for(let raw of lines){
+    const line=raw.trimEnd();
+    let m;
+    if(!line.trim()){closeList();continue;}
+    if(m=line.match(/^(#{1,3})\s+(.*)$/)){closeList();const n=m[1].length;html+=`<h${n}>${inline(m[2])}</h${n}>`;continue;}
+    if(m=line.match(/^\s*[-*]\s+(.*)$/)){if(list!=='ul'){closeList();list='ul';html+='<ul>';}html+=`<li>${inline(m[1])}</li>`;continue;}
+    if(m=line.match(/^\s*\d+\.\s+(.*)$/)){if(list!=='ol'){closeList();list='ol';html+='<ol>';}html+=`<li>${inline(m[1])}</li>`;continue;}
+    closeList();html+=`<p>${inline(line)}</p>`;
+  }
+  closeList();
+  return html;
+}
 let USER=null;
 const col=document.getElementById('col');
 const footer=document.getElementById('footer');
 const who=document.getElementById('who');
 
 function el(html){const t=document.createElement('template');t.innerHTML=html.trim();return t.content.firstChild;}
-function scroll(){window.scrollTo(0,document.body.scrollHeight);document.querySelector('main').scrollTop=1e9;}
+function scroll(){const m=document.querySelector('main');requestAnimationFrame(()=>{m.scrollTop=m.scrollHeight;});}
 
 function addUser(text){
   col.appendChild(el(`<div class="msg user"><div class="role">You</div><div class="bubble"></div></div>`));
@@ -292,14 +345,34 @@ async function login(){
   USER=d.user_id;
   who.textContent=`${d.full_name}${d.is_premium?' · premium':''}`;
   document.getElementById('login').remove();
+  document.getElementById('logout').style.display='inline-block';
   footer.style.display='block';
   col.appendChild(el(`<div class="msg assistant"><div class="role">Agent</div><div class="bubble">Hi ${d.full_name}! Ask me about your orders — status, history, cancellations, or address changes.</div></div>`));
+  renderChips();
   document.getElementById('input').focus();
+}
+
+const SAMPLES=[
+  "Where is my last order?",
+  "Show me all my orders",
+  "Cancel my processing order",
+  "I want to return order 1",
+  "'; DROP TABLE users; --"
+];
+function renderChips(){
+  const wrap=el(`<div class="chips" id="chips"><div class="label">Try asking</div></div>`);
+  SAMPLES.forEach(q=>{
+    const c=el(`<button class="chip"></button>`); c.textContent=q;
+    c.onclick=()=>{ const i=document.getElementById('input'); i.value=q; send(); };
+    wrap.appendChild(c);
+  });
+  col.appendChild(wrap); scroll();
 }
 
 async function send(){
   const input=document.getElementById('input');
   const text=input.value.trim(); if(!text||!USER) return;
+  const chips=document.getElementById('chips'); if(chips) chips.remove();
   input.value=''; input.style.height='auto';
   document.getElementById('send').disabled=true;
   addUser(text);
@@ -313,13 +386,19 @@ async function send(){
     else{
       if(d.blocked) node.classList.add('blocked');
       renderSteps(node.querySelector('.steps-host'),d.tool_calls);
-      bubble.innerHTML=marked.parse(d.response||'');
+      bubble.innerHTML=md(d.response||'');
     }
   }catch(e){bubble.textContent='Network error: '+e;}
   document.getElementById('send').disabled=false; scroll();
   input.focus();
 }
 
+async function logout(){
+  try{ if(USER) await fetch('/api/logout',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_id:USER})}); }
+  catch(e){}
+  location.reload();
+}
+document.getElementById('logout').onclick=logout;
 document.getElementById('loginBtn').onclick=login;
 document.getElementById('password').addEventListener('keydown',e=>{if(e.key==='Enter')login();});
 document.getElementById('send').onclick=send;
