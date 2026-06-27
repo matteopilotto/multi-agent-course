@@ -44,9 +44,9 @@ live in that module's `study-material/` subfolder, alongside the module's suppor
 files and pull in the supporting material for hands-on work. Copy `modules/_TEMPLATE/` (whose
 five files become the module's `study-material/`) when adding a new module.
 
-> Note: `Module_1_Agent_Loop` and `Module_2_Skills_Sub_Agents` currently have the full
-> `study-material/` set. The other modules so far contain only supporting material (notebooks,
-> code, READMEs); their teaching files still need to be authored.
+> Note: `Module_1_Agent_Loop`, `Module_2_Skills_Sub_Agents`, and `Module_5_Multi_Agents`
+> currently have the full `study-material/` set. The remaining modules so far contain only
+> supporting material (notebooks, code, READMEs); their teaching files still need to be authored.
 
 ## Teaching style
 

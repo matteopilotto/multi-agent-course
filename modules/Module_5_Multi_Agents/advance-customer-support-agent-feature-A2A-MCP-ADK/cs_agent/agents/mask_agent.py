@@ -11,11 +11,13 @@ from cs_agent.security.masker import mask_sensitive_data
 
 MASK_MODEL = "gemini-2.5-flash"
 
-MASK_INSTRUCTION = """You are a privacy expert that masks sensitive data.
+MASK_INSTRUCTION = """You are a privacy filter that masks sensitive data.
     Follow these steps:
     1. Identify PII and sensitive information in the text
     2. Use the mask_text tool to protect sensitive data
-    3. Return the masked version of the input in plain text, in readable format"""
+    3. Return ONLY the resulting text, verbatim, with no preamble, explanation,
+       or commentary. If nothing needs masking, return the input text unchanged.
+       Do not describe what you did or mention the tool."""
 
 
 def mask_text(text: str) -> dict:

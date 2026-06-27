@@ -55,8 +55,9 @@ Module_5_Multi_Agents/
 ```
 
 > **Note:** This module is taught primarily through the hands-on project below, with one supporting
-> notebook (see *Companion Notebook* next). The other modules' `study-material/` lesson files are the
-> conceptual companion; here the system *is* the lesson.
+> notebook (see *Companion Notebook* next). The conceptual companion lives in
+> [`study-material/`](study-material/) — `lesson.md`, `key-concepts.md`, `exercises.md`, `quiz.md`,
+> and `recap-and-preview.md` — but here the system *is* the lesson: read the concepts, then go run it.
 
 ---
 
@@ -109,6 +110,22 @@ How the pieces map to the module's concepts:
 The project's own [`README.md`](advance-customer-support-agent-feature-A2A-MCP-ADK/README.md) has the
 full prerequisites, step-by-step setup (PostgreSQL, MCP Toolbox, A2A servers, the CLI), the request
 flow, and a troubleshooting guide. Start there once you've got the conceptual picture above.
+
+---
+
+## Environment Setup
+
+The capstone targets **Python 3.12+**. Create an isolated conda environment before installing:
+
+```bash
+conda create -y -n customer-support python=3.12   # creates Python 3.12.x
+conda activate customer-support
+cd advance-customer-support-agent-feature-A2A-MCP-ADK
+pip install -r requirements.txt
+```
+
+See the project [`README.md`](advance-customer-support-agent-feature-A2A-MCP-ADK/README.md#3--python-dependencies)
+for the full dependency setup (Phoenix observability + OTel pinning).
 
 ---
 
