@@ -1,14 +1,15 @@
-# Eval — the report you submit
+# Eval — how your submission is scored
 
 Every FDE project is graded against a **measurable rubric**. You generate the
-report yourself and submit it **alongside your video demo**.
+evidence yourself and submit a **Product Evaluation** report **alongside your video demo**.
 
-> **Easiest path:** run the **`/fde-live-translate-eval`** skill (in
-> `.claude/skills/`). It runs everything below *plus* a live-website test on a
-> real site (e.g. homedepot.com) and writes `PRODUCT_EVAL.md` (PDF optional) —
-> that's your submission. The steps below are what the skill runs under the hood.
+> **Do this:** run the **`/fde-live-translate-eval`** skill (in `.claude/skills/`).
+> It runs everything below *plus* a live-website test on a real site (e.g.
+> homedepot.com) and writes **`PRODUCT_EVAL.md`** (PDF optional) at the assignment
+> root — **that is what you submit.** The steps below are what the skill runs under
+> the hood; run them directly only if you want to score the rubric without the skill.
 
-## Generate your report
+## Score the rubric (the scorecard)
 
 With both services running and your backend built:
 
@@ -18,7 +19,9 @@ python eval/eval.py --student "Your Name" --video "https://…"
 
 This writes, next to this file:
 
-- **`REPORT.md`** — human-readable scored rubric + captured evidence. **Submit this.**
+- **`REPORT.md`** — human-readable scored rubric + captured evidence. This is the
+  **intermediate scorecard** the skill folds into `PRODUCT_EVAL.md`. Read it to see
+  where you stand and fix any Fail/Partial dimensions.
 - **`report.json`** — the same data, machine-readable.
 
 ## How scoring works
@@ -35,7 +38,8 @@ the **provided** `widget/`, `extension/`, or `benchmark/` files (you shouldn't t
 
 ## Submit
 
-1. `REPORT.md`
+1. **`PRODUCT_EVAL.md`** (or the PDF) — the report the `/fde-live-translate-eval` skill
+   writes at the assignment root. Not `REPORT.md` — that's the intermediate scorecard it's built from.
 2. A 60–90s screen recording: fresh page → widget translating live → whole-page translate → a cache hit shown in the badges.
 
 > This eval/report pattern is the FDE-track standard — every future assignment ships its own `eval/` with a rubric and this same `eval.py` flow.
