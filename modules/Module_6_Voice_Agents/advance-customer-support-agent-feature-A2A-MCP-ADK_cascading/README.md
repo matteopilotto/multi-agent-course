@@ -19,6 +19,56 @@ Phoenix observability. Runs entirely locally — no GCP credentials required.
 > speech-to-speech (Gemini Live). They share tools, DB, and memory so you can benchmark the
 > two head-to-head — see `benchmarking_voice_agents/`.
 
+---
+
+## Quickstart
+
+```bash
+cd advance-customer-support-agent-feature-A2A-MCP-ADK_cascading
+conda create -y -n customer-support python=3.12 && conda activate customer-support
+
+./run.sh setup        # first time only: deps, Postgres, seed, .env template
+# then put GOOGLE_API_KEY and MEM0_API_KEY in .env, and:
+./run.sh web          # text + voice UI  →  http://127.0.0.1:8000
+```
+
+Full setup details are in the numbered sections below.
+
+---
+
+## Architecture
+
+A customer-support agent over a Postgres orders DB, reachable three ways — a terminal **CLI**, a
+**text web UI**, and a **voice web UI** — all sharing one core:
+
+- **Auth & context** (`greet.py`) — email/password login, then loads the user's memory, orders,
+  and action history.
+- **Agent** — a Google ADK `LlmAgent` (`gemini-2.5-flash`) that reasons over the request and calls
+  **MCP Toolbox** tools (`get-order-status`, `find-customer-orders`, `action-log`) against Postgres.
+- **Security** — two A2A microservices: a **Judge** that gates the input (`:10002`) and a **Masker**
+  that scrubs PII from the output (`:10003`), plus a local regex **sanitizer**.
+- **Memory** — Mem0, recalled via a `search_memory` tool and saved on session end (CLI `quit`; web
+  Sign-out / tab-close).
+- **Observability** — Arize Phoenix, one trace per turn.
+
+**Every turn runs the same text pipeline**, regardless of entry point:
+
+```
+sanitize → A2A Judge → ADK agent (+ MCP tools, Mem0) → A2A Masker
+```
+
+**Voice is a cascade** wrapped around that untouched pipeline — speech in, speech out:
+
+```
+speech → STT → [ sanitize → Judge → agent → Masker ] → TTS → speech
+```
+
+Each stage is separately owned, swappable, and observable, and the Judge gates the transcript
+*before* the agent ever sees it. (The sibling **s2s** project does the same task with native
+speech-to-speech instead — see the note above.)
+
+---
+
 ## Prerequisites
 
 | Tool | Version | Purpose |

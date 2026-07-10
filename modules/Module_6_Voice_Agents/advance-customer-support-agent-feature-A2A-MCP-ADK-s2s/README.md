@@ -24,6 +24,51 @@ Phoenix observability. Runs entirely locally — no GCP credentials required.
 > STT → text-pipeline → TTS cascade with a full pre-agent security gate. They share tools,
 > DB, and memory so you can benchmark the two head-to-head — see `benchmarking_voice_agents/`.
 
+---
+
+## Quickstart
+
+```bash
+cd advance-customer-support-agent-feature-A2A-MCP-ADK-s2s
+conda create -y -n customer-support python=3.12 && conda activate customer-support
+
+./run.sh setup        # first time only: deps, Postgres, seed, .env template
+# then put GOOGLE_API_KEY and MEM0_API_KEY in .env, and:
+./run.sh voice        # speech-to-speech UI  →  http://127.0.0.1:8001
+```
+
+Full setup details are in the numbered sections below.
+
+---
+
+## Architecture
+
+The same customer-support agent over a Postgres orders DB, reachable three ways — a terminal
+**CLI**, a **text web UI**, and a **voice web UI** — all sharing one core. What's different here
+is voice: it's **native speech-to-speech**, not a cascade.
+
+- **Auth & context** (`greet.py`) — email/password login, then loads memory, orders, and action
+  history.
+- **Agent** — a Google ADK `LlmAgent` calling **MCP Toolbox** tools against Postgres. CLI/text use
+  `gemini-2.5-flash`; **voice runs the same agent on a Gemini Live model** via
+  `runner.run_live()` + `RunConfig(streaming_mode=BIDI, response_modalities=["AUDIO"])` — audio in,
+  audio out, no STT/LLM/TTS cascade.
+- **Security** — because the Live model hears raw audio, the pipeline can't gate up front: the A2A
+  **Judge** runs **post-hoc** on the transcript and the **Masker** is display/log-only. A weaker
+  guarantee, deliberately traded for lower latency and natural turn-taking.
+- **Memory** — Mem0, recalled via a `search_memory` tool and saved on session end (CLI `quit`; web
+  Sign-out / tab-close).
+- **Observability** — Arize Phoenix, one trace per turn.
+
+**Voice transport** — one `/api/voice` WebSocket carries a full-duplex Live session: mic audio
+streams **up** (`send_realtime`) while agent audio streams **down** at the same time, so barge-in
+is native. Typed messages use the same session via `send_content`.
+
+(The sibling **cascade** project does the same task as a STT → text-pipeline → TTS cascade with a
+full pre-agent security gate — see the note above.)
+
+---
+
 ## Prerequisites
 
 | Tool | Version | Purpose |
