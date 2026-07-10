@@ -1,0 +1,9 @@
+{
+  "name": "aurora-livekit-talk-test",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Local browser talk test for the Aurora LiveKit room demo.",
+  "dependencies": {
+    "livekit-client": "2.20.1"
+  }
+}

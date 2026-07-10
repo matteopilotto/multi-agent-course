@@ -40,6 +40,7 @@ Assignment_2_voice_agent/
 ├── livekit/             ← optional room/session demo
 │   ├── create_room.py
 │   ├── create_token.py
+│   ├── talk_server.py
 │   ├── start_local_server.sh
 │   └── requirements.txt
 ├── pipeline/            ← the agent + voice loop
@@ -304,6 +305,7 @@ cd ../livekit
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+npm install
 ```
 
 Start Docker Desktop, then start a local LiveKit server in a separate terminal:
@@ -333,6 +335,15 @@ Create caller and agent participant tokens:
 python create_token.py --identity caller-demo --name "Caller Demo"
 python create_token.py --identity aurora-agent --name "Aurora Agent"
 ```
+
+Mimic a caller and agent talking:
+
+```bash
+python talk_server.py
+```
+
+Open `http://localhost:5173` in two browser tabs. Join one tab as `Caller Demo`
+and the other as `Aurora Agent`, then allow microphone access in both tabs.
 
 Conceptually:
 

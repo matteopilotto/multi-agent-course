@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Aurora LiveKit Talk Test</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main>
+      <section class="panel">
+        <div>
+          <p class="eyebrow">Local LiveKit</p>
+          <h1>Aurora Talk Test</h1>
+          <p class="status" id="status">Disconnected</p>
+        </div>
+
+        <label>
+          Identity
+          <select id="identity">
+            <option value="caller-demo" selected>Caller Demo</option>
+            <option value="aurora-agent">Aurora Agent</option>
+          </select>
+        </label>
+
+        <div class="actions">
+          <button id="join">Join</button>
+          <button id="leave" disabled>Leave</button>
+          <button id="mute" disabled>Mute mic</button>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Participants</h2>
+        <div id="participants" class="participants"></div>
+      </section>
+
+      <section class="panel">
+        <h2>Audio</h2>
+        <div id="audio"></div>
+      </section>
+    </main>
+
+    <script type="module" src="./talk.js"></script>
+  </body>
+</html>

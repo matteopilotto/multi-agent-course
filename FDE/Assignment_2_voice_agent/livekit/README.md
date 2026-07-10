@@ -19,6 +19,7 @@ cd FDE/Assignment_2_voice_agent/livekit
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+npm install
 ```
 
 ## Start A Local LiveKit Server
@@ -71,6 +72,31 @@ python create_token.py --identity aurora-agent --name "Aurora Agent"
 ```
 
 The caller token represents a user or phone caller. The agent token represents the voice agent joining the same room.
+
+## Mimic A Conversation In Two Browser Tabs
+
+Token creation does not join anyone to the room. A participant joins only when a
+client uses a token to connect and publish audio.
+
+Start the local talk client:
+
+```bash
+python talk_server.py
+```
+
+Open `http://localhost:5173` in two browser tabs:
+
+- In tab 1, choose `Caller Demo` and click `Join`.
+- In tab 2, choose `Aurora Agent` and click `Join`.
+- Allow microphone access in both tabs.
+
+Now the two tabs are real LiveKit participants in `aurora-demo-room`. Speak in one
+tab and listen in the other. This mimics the media/session layer, not the hotel
+agent brain.
+
+To make Aurora answer as the actual hotel agent, the next production step is an
+agent worker that joins as `aurora-agent`, subscribes to caller audio, runs STT,
+calls the hotel agent tools, and publishes TTS audio back into the room.
 
 ## How This Maps To SIP
 

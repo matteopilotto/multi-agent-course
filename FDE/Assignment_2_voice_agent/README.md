@@ -26,6 +26,7 @@ Assignment_2_voice_agent/
 │   ├── README.md
 │   ├── create_room.py
 │   ├── create_token.py
+│   ├── talk_server.py
 │   └── requirements.txt
 ├── pipeline/
 │   ├── agent.py
@@ -141,6 +142,7 @@ cd FDE/Assignment_2_voice_agent/livekit
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+npm install
 ```
 
 Start Docker Desktop, then start a local LiveKit server in a separate terminal:
@@ -170,6 +172,15 @@ Create tokens for a caller and an agent participant:
 python create_token.py --identity caller-demo --name "Caller Demo"
 python create_token.py --identity aurora-agent --name "Aurora Agent"
 ```
+
+Mimic two people talking in the room:
+
+```bash
+python talk_server.py
+```
+
+Open `http://localhost:5173` in two browser tabs. Join one tab as `Caller Demo`
+and the other as `Aurora Agent`. This tests LiveKit audio between participants.
 
 This does not set up SIP by itself. Real SIP requires a LiveKit SIP trunk and dispatch rule. The room demo is the right intermediate step because it shows the session/media concept before adding phone-number infrastructure.
 

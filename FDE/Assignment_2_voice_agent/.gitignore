@@ -3,5 +3,6 @@ pipeline/.env
 pipeline/.venv/
 livekit/.venv/
 livekit/.env
+livekit/node_modules/
 __pycache__/
 *.pyc
