@@ -11,4 +11,5 @@ docker run --rm \
   -p 7882:7882/udp \
   livekit/livekit-server:latest \
   --bind 0.0.0.0 \
+  --node-ip 127.0.0.1 \
   --dev
