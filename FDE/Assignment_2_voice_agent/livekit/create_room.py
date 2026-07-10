@@ -1,11 +1,9 @@
 """Create a LiveKit room for the optional room/session demo.
 
-Required environment variables:
+Optional:
     LIVEKIT_URL
     LIVEKIT_API_KEY
     LIVEKIT_API_SECRET
-
-Optional:
     LIVEKIT_ROOM
 """
 
@@ -14,9 +12,18 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+import warnings
 from pathlib import Path
 
+import jwt
 from livekit import api
+
+LOCAL_DEFAULTS = {
+    "LIVEKIT_URL": "http://localhost:7880",
+    "LIVEKIT_API_KEY": "devkey",
+    "LIVEKIT_API_SECRET": "secret",
+    "LIVEKIT_ROOM": "aurora-demo-room",
+}
 
 
 def _load_env_files() -> None:
@@ -32,23 +39,25 @@ def _load_env_files() -> None:
             os.environ.setdefault(key.strip(), value.strip().strip("\"'"))
 
 
-def _require_env(names: list[str]) -> None:
-    missing = [name for name in names if not os.getenv(name)]
-    if missing:
-        joined = ", ".join(missing)
-        raise SystemExit(f"Missing required environment variable(s): {joined}")
+def _setting(name: str) -> str:
+    return os.getenv(name, LOCAL_DEFAULTS[name])
 
 
 def _room_name() -> str:
-    return os.getenv("LIVEKIT_ROOM", "aurora-demo-room")
+    return _setting("LIVEKIT_ROOM")
 
 
 async def main() -> None:
     _load_env_files()
-    _require_env(["LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET"])
     room_name = _room_name()
+    if _setting("LIVEKIT_API_SECRET") == LOCAL_DEFAULTS["LIVEKIT_API_SECRET"]:
+        warnings.filterwarnings("ignore", category=jwt.InsecureKeyLengthWarning)
     try:
-        async with api.LiveKitAPI() as lkapi:
+        async with api.LiveKitAPI(
+            url=_setting("LIVEKIT_URL"),
+            api_key=_setting("LIVEKIT_API_KEY"),
+            api_secret=_setting("LIVEKIT_API_SECRET"),
+        ) as lkapi:
             room = await lkapi.room.create_room(
                 api.CreateRoomRequest(
                     name=room_name,

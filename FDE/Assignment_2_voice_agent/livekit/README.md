@@ -21,18 +21,34 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-## Configure
+## Start A Local LiveKit Server
 
-Set these environment variables:
+This demo is local-first. You do not need LiveKit Cloud credentials.
+Make sure Docker Desktop is running first.
+
+In a separate terminal, run:
+
+```bash
+./start_local_server.sh
+```
+
+The local dev server uses:
 
 ```env
-LIVEKIT_URL=https://your-project.livekit.cloud
-LIVEKIT_API_KEY=your_livekit_api_key
-LIVEKIT_API_SECRET=your_livekit_api_secret
+LIVEKIT_URL=http://localhost:7880
+LIVEKIT_API_KEY=devkey
+LIVEKIT_API_SECRET=secret
 LIVEKIT_ROOM=aurora-demo-room
 ```
 
-You can export them in your shell, or place them in a local `livekit/.env` file. The scripts also check `pipeline/.env`. Do not commit real LiveKit credentials.
+The scripts use these local defaults automatically.
+
+## Optional: Override Configuration
+
+The local defaults are enough for the workshop. If you already have another LiveKit
+server, you can override `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`,
+and `LIVEKIT_ROOM` in a local `livekit/.env` file. The scripts also check
+`pipeline/.env`. Do not commit real credentials.
 
 ## Create A Room
 

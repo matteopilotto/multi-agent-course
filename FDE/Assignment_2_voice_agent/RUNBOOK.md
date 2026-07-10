@@ -18,8 +18,8 @@ There are **three provider modes**, all behind the same code:
 | Mode | Needs | For |
 |------|-------|-----|
 | `mock` | nothing (offline) | rehearsal, tests, the SIP call demo, live fallback |
-| `groq` | free key | the real "talk to a bot" demo  -  $0 on free tier |
-| `openai` | your key | fallback / if you prefer OpenAI (~$1–2 total) |
+| `openai` | your key | the real "talk to a bot" demo |
+| `groq` | optional key | alternate low-cost provider |
 
 ---
 
@@ -27,7 +27,7 @@ There are **three provider modes**, all behind the same code:
 
 - **Python 3.10+** (`python3 --version`).
 - For **Part 1 (offline)**: nothing else.
-- For **Part 3 (live)**: a free Groq key (https://console.groq.com), plus `pip install` and a mic.
+- For **Part 3 (live)**: an OpenAI or Groq key, plus `pip install` and a mic.
 
 ---
 
@@ -40,6 +40,7 @@ Assignment_2_voice_agent/
 ├── livekit/             ← optional room/session demo
 │   ├── create_room.py
 │   ├── create_token.py
+│   ├── start_local_server.sh
 │   └── requirements.txt
 ├── pipeline/            ← the agent + voice loop
 │   ├── providers.py     ← adaptor: groq / openai / mock
@@ -251,21 +252,22 @@ Create your `.env`:
 cp config.example.env .env
 ```
 
-Edit `.env`:
+Edit `.env` for OpenAI:
 
 ```
-PROVIDER=groq
-GROQ_API_KEY=<your free key from console.groq.com>
+PROVIDER=openai
+OPENAI_API_KEY=<your key>
+TTS_BACKEND=system
 ```
 
-> Groq TTS (`playai-tts`) is in preview and needs terms accepted once in the Groq console.
-> If it errors, set `TTS_BACKEND=system` in `.env` to use a local voice command.
+Use `TTS_BACKEND=system` while rehearsing to keep the demo cheaper and avoid provider
+TTS latency. Switch to provider TTS only when you want a polished voice.
 
 ---
 
 ## Part 3  -  Run live
 
-Typed input against the real Groq LLM + tools (no mic needed  -  good first live check):
+Typed input against the live LLM + tools (no mic needed  -  good first live check):
 
 ```bash
 python3 voice_loop.py --text
@@ -280,11 +282,11 @@ python3 voice_loop.py
 Speak, pause, and the agent replies. The per-turn latency table now shows **real** stt /
 llm+tools / tts milliseconds  -  point out that the LLM stage dominates the ~800 ms budget.
 
-Switch to OpenAI any time by editing `.env`:
+Switch to Groq any time by editing `.env`:
 
 ```
-PROVIDER=openai
-OPENAI_API_KEY=<your key>
+PROVIDER=groq
+GROQ_API_KEY=<your key>
 ```
 
 Nothing else changes  -  same commands, same loop.
@@ -294,7 +296,8 @@ Nothing else changes  -  same commands, same loop.
 ## Part 4  -  Optional LiveKit room/session demo
 
 This step is optional. It shows the real room/session abstraction that sits between a local
-voice agent and a production telephony setup. It does not configure SIP by itself.
+voice agent and a production telephony setup. It runs locally and does not require LiveKit
+Cloud. It does not configure SIP by itself.
 
 ```bash
 cd ../livekit
@@ -303,12 +306,18 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-Set LiveKit credentials:
+Start Docker Desktop, then start a local LiveKit server in a separate terminal:
 
+```bash
+./start_local_server.sh
 ```
-LIVEKIT_URL=https://your-project.livekit.cloud
-LIVEKIT_API_KEY=<your LiveKit API key>
-LIVEKIT_API_SECRET=<your LiveKit API secret>
+
+The local development defaults are:
+
+```text
+LIVEKIT_URL=http://localhost:7880
+LIVEKIT_API_KEY=devkey
+LIVEKIT_API_SECRET=secret
 LIVEKIT_ROOM=aurora-demo-room
 ```
 
@@ -342,10 +351,11 @@ For real SIP, add a LiveKit SIP trunk, dispatch rule, and an agent worker that j
 
 | Symptom | Fix |
 |---------|-----|
-| `RuntimeError: Set GROQ_API_KEY…` | Add the key to `.env`, or run with `PROVIDER=mock` |
+| `RuntimeError: Set GROQ_API_KEY...` | Set `PROVIDER=openai` with `OPENAI_API_KEY`, add a Groq key, or run with `PROVIDER=mock` |
+| `RuntimeError: Set OPENAI_API_KEY...` | Add `OPENAI_API_KEY` to `.env`, or run with `PROVIDER=mock` |
 | `ModuleNotFoundError: openai` | You're live without installing  -  `pip install -r requirements.txt`, or use `PROVIDER=mock` (needs nothing) |
 | `sounddevice`/PortAudio error | `brew install portaudio`, or use `--text` mode |
-| Groq TTS error / no audio | Accept model terms in the Groq console, or set `TTS_BACKEND=system` |
+| Provider TTS error / no audio | Set `TTS_BACKEND=system` |
 | Mic doesn't capture | Grant terminal microphone permission, or use `--text` |
 | Everything feels slow | Try `LLM_MODEL=llama-3.1-8b-instant` in `.env` (faster, weaker tool use) |
 | Live services down mid-demo | `PROVIDER=mock`  -  the whole thing runs offline instantly |
@@ -356,7 +366,7 @@ For real SIP, add a LiveKit SIP trunk, dispatch rule, and an agent worker that j
 
 - **Verified offline** (Part 1): `smoke_test.py`, `voice_loop.py --text` (mock), `demo_call.py`
   (both scenarios), `ivr_menu_mock.py`. Outputs above are the actual captured runs.
-- **Needs your laptop** (Parts 2-3): the `pip install`, a real Groq/OpenAI key, and mic-mode
+- **Needs your laptop** (Parts 2-3): the `pip install`, a real OpenAI/Groq key, and mic-mode
   `voice_loop.py`. Do one live run before the session using the setup steps in `README.md`.
-- **Optional LiveKit** (Part 4): LiveKit Cloud credentials if you want to create a real room
-  and participant tokens.
+- **Optional LiveKit** (Part 4): Docker or a local LiveKit server binary if you want to create
+  a local room and participant tokens.

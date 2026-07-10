@@ -143,12 +143,18 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-Set LiveKit credentials in your shell or copy them into `pipeline/.env`:
+Start Docker Desktop, then start a local LiveKit server in a separate terminal:
 
-```env
-LIVEKIT_URL=https://your-project.livekit.cloud
-LIVEKIT_API_KEY=your_livekit_api_key
-LIVEKIT_API_SECRET=your_livekit_api_secret
+```bash
+./start_local_server.sh
+```
+
+The local server uses these development defaults, which the scripts also use automatically:
+
+```text
+LIVEKIT_URL=http://localhost:7880
+LIVEKIT_API_KEY=devkey
+LIVEKIT_API_SECRET=secret
 LIVEKIT_ROOM=aurora-demo-room
 ```
 

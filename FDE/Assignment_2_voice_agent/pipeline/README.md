@@ -8,21 +8,27 @@ The part attendees build/run live. A terminal voice agent:
 
 No phone, no SIP  -  just your laptop mic. Telephony is covered by `../mocks/`.
 
-## Provider: one adaptor, two backends (Groq / OpenAI)
+## Provider: one adaptor, three modes
 
-Groq speaks the OpenAI API dialect, so `providers.py` is a single code path for both.
-**You switch backends by flipping one line in `.env`** (`PROVIDER=groq` → `openai`); model
-names default sensibly per provider.
+`providers.py` keeps mock, OpenAI, and Groq behind the same interface. You switch
+backends by flipping one line in `.env`; model names default sensibly per provider.
 
-| Stage | Groq (free tier) | OpenAI (your key) |
-|-------|------------------|-------------------|
-| LLM | `llama-3.3-70b-versatile` | `gpt-4o-mini` |
-| STT | `whisper-large-v3-turbo` | `whisper-1` |
-| TTS | `playai-tts` *(preview  -  accept terms)* | `tts-1` |
+| Mode | Needs | Use it for |
+|------|-------|------------|
+| `mock` | No key, network, or SDK | Rehearsal, tests, and no-cost fallback |
+| `openai` | OpenAI key | Current live demo path |
+| `groq` | Groq key | Alternate low-cost provider |
 
-**Recommended for the workshop:** `PROVIDER=groq` (free + fast). If Groq TTS gives you
-trouble, set `TTS_BACKEND=system` to use a local voice command  -  the demo keeps working
-at zero cost. Switching to OpenAI later is just `PROVIDER=openai` + your key.
+Recommended for rehearsal:
+
+```env
+PROVIDER=openai
+OPENAI_API_KEY=your_key_here
+TTS_BACKEND=system
+```
+
+`TTS_BACKEND=system` uses your laptop voice command, so you avoid cloud TTS cost and
+keep the demo moving if provider audio has latency or quota issues.
 
 For a more natural OpenAI voice, use:
 
@@ -46,14 +52,14 @@ pip install -r requirements.txt
 cp config.example.env .env      # set PROVIDER + the matching API key
 ```
 
-- Get a **free Groq key** at https://console.groq.com and put it in `GROQ_API_KEY`.
+- Use an OpenAI key with `PROVIDER=openai` and `OPENAI_API_KEY`.
+- Groq is also supported as an alternate provider with `PROVIDER=groq` and `GROQ_API_KEY`.
 - `sounddevice` needs PortAudio: `brew install portaudio` if the import fails.
-- Groq TTS requires accepting model terms once in the Groq console.
 
 ## Test it with no network (offline mock)
 
-There's a third backend, `PROVIDER=mock`, that returns scripted STT/LLM/TTS with **no key,
-no network, and no SDK installed**  -  the same interface as Groq/OpenAI, so it exercises the
+`PROVIDER=mock` returns scripted STT/LLM/TTS with **no key,
+no network, and no SDK installed**  -  the same interface as OpenAI/Groq, so it exercises the
 real loop and tool calls. Use it for rehearsals, CI, or a projector that has no internet.
 
 ```bash
@@ -80,7 +86,7 @@ per-stage latency breakdown (stt / llm+tools / tts) against the ~800 ms target.
 
 | File | Role |
 |------|------|
-| `providers.py` | The adaptor  -  Groq/OpenAI via the OpenAI SDK. `chat` / `transcribe` / `synthesize`. |
+| `providers.py` | The adaptor  -  mock plus OpenAI/Groq via the OpenAI SDK. `chat` / `transcribe` / `synthesize`. |
 | `agent.py` | The brain  -  system prompt + hotel tools (`check_availability`, `create_booking`, `transfer_to_human`, `end_call`) via OpenAI-style tool calling. |
 | `voice_loop.py` | The loop  -  VAD endpointing, STT, agent turn, TTS playback, latency timing, `--text` mode. |
 
@@ -93,10 +99,10 @@ Try: *"I need a room from August 12 to August 14 for two guests."* → watch
 
 1. **Layer A:** ask for a room, hear it answer. "We have a voice agent."
 2. **Layer B:** "I need a room for two guests..." → `check_availability` fires in the logs.
-3. **Latency:** point at the per-turn breakdown  -  the LLM stage dominates; that's why a fast
-   model (Groq) matters.
+3. **Latency:** point at the per-turn breakdown  -  the LLM and TTS stages are usually the tuning targets.
 4. **Hand-off:** "Now  -  how does a real phone call get here?" → open `../mocks/`.
 
 ## Budget check
-On Groq's free tier the whole workshop is **$0**. If you fall back to OpenAI: pipeline STT+LLM+TTS
-≈ **~$1–2** for a full session  -  comfortably under $10.
+Mock mode and local LiveKit are **$0**. With OpenAI plus `TTS_BACKEND=system`, the live
+pipeline should stay very low for a short workshop demo because the paid calls are STT and
+LLM only. Use provider TTS only for the final polished run.
