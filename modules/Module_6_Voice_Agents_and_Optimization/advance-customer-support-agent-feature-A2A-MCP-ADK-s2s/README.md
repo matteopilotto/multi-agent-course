@@ -14,6 +14,11 @@ latency and more natural turn-taking.
 Built with Google ADK, MCP Toolbox, A2A security microservices, Mem0 memory, and Arize
 Phoenix observability. Runs entirely locally — no GCP credentials required.
 
+**Models used** (all Gemini; override via env):
+- **Voice (native speech-to-speech):** `gemini-3.1-flash-live-preview`, voice `Kore` (`VOICE_MODEL` / `VOICE_NAME`)
+- **Text CLI agent:** `gemini-2.5-flash`
+- **Security Judge & Masker:** `gemini-2.5-flash`
+
 > **Speech-to-speech vs. cascade.** This is the S2S architecture. Its sibling project,
 > `advance-customer-support-agent-feature-A2A-MCP-ADK_cascading`, does the same task as a
 > STT → text-pipeline → TTS cascade with a full pre-agent security gate. They share tools,

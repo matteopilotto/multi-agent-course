@@ -8,6 +8,12 @@ and fully observable; the security Judge gates the transcript *before* the agent
 Built with Google ADK, MCP Toolbox, A2A security microservices, Mem0 memory, and Arize
 Phoenix observability. Runs entirely locally — no GCP credentials required.
 
+**Models used** (all Gemini; override via env):
+- **STT:** `gemini-3.1-flash-lite` (`VOICE_STT_MODEL`)
+- **Agent:** `gemini-2.5-flash`
+- **TTS:** `gemini-3.1-flash-tts-preview`, voice `Kore` (`VOICE_TTS_MODEL` / `VOICE_TTS_VOICE`)
+- **Security Judge & Masker:** `gemini-2.5-flash`
+
 > **Cascade vs. speech-to-speech.** This is the cascade architecture. Its sibling project,
 > `advance-customer-support-agent-feature-A2A-MCP-ADK-s2s`, does the same task with native
 > speech-to-speech (Gemini Live). They share tools, DB, and memory so you can benchmark the
