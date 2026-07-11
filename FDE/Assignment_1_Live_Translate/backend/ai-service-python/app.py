@@ -14,6 +14,7 @@ TODOs so the widget lights up. Run:
     cp .env.example .env          # then add your API key
     uvicorn app:app --reload --port 8000
 """
+import asyncio
 import os
 import time
 
@@ -29,6 +30,7 @@ load_dotenv()
 
 MODEL = os.getenv("MODEL", "claude-sonnet-4-6")
 DB_PATH = os.getenv("TRANSLATION_DB_PATH", "translations.db")
+BATCH_CONCURRENCY = int(os.getenv("BATCH_CONCURRENCY", "8"))
 
 app = FastAPI(title="FDE Live Translate — AI Service")
 log = get_logger("ai-service")
