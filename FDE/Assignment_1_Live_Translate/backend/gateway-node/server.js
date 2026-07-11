@@ -16,7 +16,16 @@
 const express = require("express");
 const cors = require("cors");
 const path = require("path");
+const crypto = require("crypto");
+const fs = require("fs");
 require("dotenv").config();
+
+const logStream = fs.createWriteStream(path.join(__dirname, "gateway.log"), { flags: "a" });
+function logLine(entry) {
+  const line = JSON.stringify({ ts: new Date().toISOString(), ...entry });
+  console.log(line);
+  logStream.write(line + "\n");
+}
 
 const PORT = process.env.PORT || 8787;
 const AI_SERVICE_URL = process.env.AI_SERVICE_URL || "http://localhost:8000";
@@ -29,21 +38,20 @@ const startedAt = Date.now();
 app.use(cors()); // dev: allow every origin so the widget works on any page
 app.use(express.json({ limit: "1mb" }));
 
-/*
- * TODO (YOU) #1 — request logging middleware.
- * Log one line per request AFTER it finishes, including: method, url,
- * status code, and duration in ms. Use res.on("finish", ...) so you can
- * read the final status code and measure elapsed time.
- * Keep it structured enough to grep later.
- *
- * app.use((req, res, next) => {
- *   const t0 = Date.now();
- *   res.on("finish", () => {
- *     // console.log(...method, url, statusCode, Date.now() - t0 + "ms")
- *   });
- *   next();
- * });
- */
+app.use((req, res, next) => {
+  const t0 = Date.now();
+  req.requestId = req.get("X-Request-Id") || crypto.randomUUID();
+  res.on("finish", () => {
+    logLine({
+      method: req.method,
+      url: req.originalUrl,
+      status: res.statusCode,
+      durationMs: Date.now() - t0,
+      requestId: req.requestId,
+    });
+  });
+  next();
+});
 
 // --- serve the widget to the console loader ------------------------------
 app.get("/widget.js", (req, res) => {
