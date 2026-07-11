@@ -23,7 +23,17 @@ from anthropic import AsyncAnthropic
 
 MODEL_DEFAULT = os.getenv("MODEL", "claude-sonnet-4-6")
 
-client = AsyncAnthropic()  # reads ANTHROPIC_API_KEY
+_client: AsyncAnthropic | None = None
+
+
+def _get_client() -> AsyncAnthropic:
+    # Built lazily (not at import time) so ANTHROPIC_API_KEY is read after
+    # app.py's load_dotenv() has run, regardless of import order.
+    global _client
+    if _client is None:
+        _client = AsyncAnthropic()  # reads ANTHROPIC_API_KEY
+    return _client
+
 
 SYSTEM_PROMPT = (
     "You are a professional translator. Translate the user's English text "
@@ -35,7 +45,7 @@ SYSTEM_PROMPT = (
 
 async def translate_text(text: str, target: str = "es-MX", model: str = MODEL_DEFAULT) -> str:
     """Return `text` translated into `target` (Mexican Spanish by default)."""
-    msg = await client.messages.create(
+    msg = await _get_client().messages.create(
         model=model,
         max_tokens=1024,
         system=SYSTEM_PROMPT,
