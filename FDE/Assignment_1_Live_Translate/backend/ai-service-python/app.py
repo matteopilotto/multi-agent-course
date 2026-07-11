@@ -18,7 +18,7 @@ import os
 import time
 
 from dotenv import load_dotenv
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from pydantic import BaseModel
 
 from lib.cache import TwoTierCache
@@ -75,24 +75,34 @@ async def translate_one(text: str, target: str) -> dict:
 
 
 @app.post("/translate")
-async def translate(body: TranslateIn):
+async def translate(body: TranslateIn, request: Request):
+    request_id = request.headers.get("x-request-id")
     result = await translate_one(body.text, body.target)
     log.info(
         "translate",
-        extra={"cached": result["cached"], "latencyMs": result["latencyMs"], "chars": len(body.text)},
+        extra={
+            "cached": result["cached"],
+            "latencyMs": result["latencyMs"],
+            "chars": len(body.text),
+            "requestId": request_id,
+        },
     )
     return result
 
 
 @app.post("/translate/batch")
-async def translate_batch(body: BatchIn):
+async def translate_batch(body: BatchIn, request: Request):
+    request_id = request.headers.get("x-request-id")
     t0 = time.perf_counter()
     results = []
     for t in body.texts:
         results.append(await translate_one(t, body.target))
     latency = int((time.perf_counter() - t0) * 1000)
     hits = sum(1 for r in results if r["cached"])
-    log.info("translate_batch", extra={"count": len(results), "hits": hits, "latencyMs": latency})
+    log.info(
+        "translate_batch",
+        extra={"count": len(results), "hits": hits, "latencyMs": latency, "requestId": request_id},
+    )
     # widget expects {results: [{translated, cached}], latencyMs}
     return {"results": [{"translated": r["translated"], "cached": r["cached"]} for r in results], "latencyMs": latency}
 
