@@ -35,6 +35,10 @@
     window.FDE_CONFIG || {}
   );
 
+  function apiUrl() {
+    return (window.FDE_CONFIG && window.FDE_CONFIG.API_URL) || CONFIG.API_URL;
+  }
+
   // ---- state --------------------------------------------------------------
   let panelOpen = false;
   let busy = false;
@@ -153,7 +157,7 @@
       <div class="fde-badges" id="fde-badges"></div>
       <button class="fde-btn primary" id="fde-page" type="button">Translate page</button>
       <button class="fde-btn ghost" id="fde-restore" type="button">Restore page</button>
-      <div class="fde-status" id="fde-status">Backend: ${CONFIG.API_URL}</div>
+      <div class="fde-status" id="fde-status">Backend: ${apiUrl()}</div>
     </div>`;
 
   document.body.appendChild(fab);
@@ -173,6 +177,9 @@
   window.addEventListener("FDE_TRANSLATE_PAGE", translatePage);
   window.addEventListener("FDE_RESTORE_PAGE", restorePage);
   window.addEventListener("FDE_OPEN", () => setPanel(true));
+  window.addEventListener("FDE_CONFIG_CHANGED", () => {
+    statusEl.textContent = "Backend: " + apiUrl();
+  });
 
   // ---- actions ------------------------------------------------------------
   function togglePanel() {
@@ -181,6 +188,7 @@
   function setPanel(open) {
     panelOpen = open;
     panel.classList.toggle("open", open);
+    if (open) statusEl.textContent = "Backend: " + apiUrl();
   }
 
   async function translatePage() {
@@ -234,7 +242,7 @@
 
   // ---- backend I/O --------------------------------------------------------
   async function postJSON(path, body) {
-    const res = await fetch(CONFIG.API_URL + path, {
+    const res = await fetch(apiUrl() + path, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -281,7 +289,7 @@
     } else if (err.message && err.message.startsWith("HTTP")) {
       setStatus(`Backend error (${err.message}). Check your gateway/AI-service logs.`, true);
     } else {
-      setStatus(`Can't reach backend at ${CONFIG.API_URL}. Is your Node gateway running?`, true);
+      setStatus(`Can't reach backend at ${apiUrl()}. Is your Node gateway running?`, true);
     }
     console.error("[FDE]", err);
   }
@@ -298,5 +306,5 @@
   NotImplemented.prototype = Object.create(Error.prototype);
 
   console.log("%c[FDE] Live Translate widget loaded.", "color:#10b981;font-weight:bold");
-  console.log("[FDE] Backend:", CONFIG.API_URL, "· open the button bottom-right.");
+  console.log("[FDE] Backend:", apiUrl(), "· open the button bottom-right.");
 })();
