@@ -28,7 +28,7 @@ from lib.logger import get_logger
 
 load_dotenv()
 
-MODEL = os.getenv("MODEL", "claude-sonnet-4-6")
+MODEL = os.getenv("MODEL", "anthropic/claude-sonnet-4")
 DB_PATH = os.getenv("TRANSLATION_DB_PATH", "translations.db")
 BATCH_CONCURRENCY = int(os.getenv("BATCH_CONCURRENCY", "8"))
 
@@ -65,7 +65,7 @@ async def translate_one(text: str, target: str) -> dict:
 
     t0 = time.perf_counter()
 
-    cached_value = await cache.get(text, target)
+    cached_value = await cache.get(text, target, model=MODEL)
     if cached_value is not None:
         latency_ms = int((time.perf_counter() - t0) * 1000)
         return {"translated": cached_value, "cached": True, "latencyMs": latency_ms, "model": MODEL}

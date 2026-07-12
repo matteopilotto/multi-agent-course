@@ -6,8 +6,10 @@ Why two tiers?
   - SQLite (disk): survives restarts, and is where you can inspect what your
     service has learned. Check memory first, then disk, then LLM.
 
-The cache key must be deterministic for the same (text, target). Hashing the
-input with sha256 gives you a compact, collision-safe key.
+The cache key must be deterministic for the same (text, target, model), so
+switching providers/models produces a cache miss instead of serving another
+model's stale output. Hashing the input with sha256 gives you a compact,
+collision-safe key.
 
 Fill in the TODOs. The method signatures and stats are laid out for you.
 """
@@ -16,8 +18,8 @@ import hashlib
 import aiosqlite
 
 
-def _key(text: str, target: str) -> str:
-    return hashlib.sha256(f"{target}::{text}".encode("utf-8")).hexdigest()
+def _key(text: str, target: str, model: str) -> str:
+    return hashlib.sha256(f"{model}::{target}::{text}".encode("utf-8")).hexdigest()
 
 
 class TwoTierCache:
@@ -47,10 +49,10 @@ class TwoTierCache:
             )
             await db.commit()
 
-    async def get(self, text: str, target: str) -> str | None:
+    async def get(self, text: str, target: str, model: str) -> str | None:
         """Return a cached translation or None. Check memory, then SQLite."""
         self._stats["requests"] += 1
-        k = _key(text, target)
+        k = _key(text, target, model)
 
         # 1) memory tier
         if k in self._mem:
@@ -79,7 +81,7 @@ class TwoTierCache:
 
     async def set(self, text: str, target: str, translated: str, model: str) -> None:
         """Store a translation in both tiers."""
-        k = _key(text, target)
+        k = _key(text, target, model)
         self._mem[k] = translated
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute(
