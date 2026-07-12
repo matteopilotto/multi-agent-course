@@ -17,6 +17,13 @@
     /* storage not available; widget falls back to its default */
   }
 
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === "sync" && changes.apiUrl) {
+      window.FDE_CONFIG = Object.assign({}, window.FDE_CONFIG, { API_URL: changes.apiUrl.newValue });
+      window.dispatchEvent(new Event("FDE_CONFIG_CHANGED"));
+    }
+  });
+
   chrome.runtime.onMessage.addListener((msg) => {
     if (!msg || !msg.type) return;
     if (msg.type === "TRANSLATE_PAGE") window.dispatchEvent(new Event("FDE_TRANSLATE_PAGE"));
