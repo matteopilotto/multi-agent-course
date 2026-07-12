@@ -23,29 +23,30 @@ import os
 
 from openai import AsyncOpenAI
 
-PROVIDER = os.getenv("LLM_PROVIDER", "openrouter").lower()
 MODEL_DEFAULT = os.getenv("MODEL", "anthropic/claude-sonnet-4.6")
 
 _client: AsyncOpenAI | None = None
 
 
 def _get_client() -> AsyncOpenAI:
-    # Built lazily (not at import time) so API keys are read after app.py's
+    # Built lazily (not at import time), and LLM_PROVIDER is read here rather
+    # than as a module-level constant, so both are read after app.py's
     # load_dotenv() has run, regardless of import order.
     global _client
     if _client is None:
-        if PROVIDER == "openrouter":
+        provider = os.getenv("LLM_PROVIDER", "openrouter").lower()
+        if provider == "openrouter":
             _client = AsyncOpenAI(
                 base_url="https://openrouter.ai/api/v1",
                 api_key=os.getenv("OPENROUTER_API_KEY"),
             )
-        elif PROVIDER == "vllm":
+        elif provider == "vllm":
             _client = AsyncOpenAI(
                 base_url=os.getenv("VLLM_BASE_URL"),
                 api_key=os.getenv("VLLM_API_KEY", "EMPTY"),  # vLLM often ignores the key
             )
         else:
-            raise ValueError(f"Unknown LLM_PROVIDER: {PROVIDER!r}")
+            raise ValueError(f"Unknown LLM_PROVIDER: {provider!r}")
     return _client
 
 
