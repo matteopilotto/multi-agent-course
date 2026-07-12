@@ -10,7 +10,7 @@ providers/models is purely `LLM_PROVIDER` + `MODEL` + API key, no code change.
 
   - LLM_PROVIDER=openrouter (default) — https://openrouter.ai/api/v1, one API
     for Claude, GPT, Gemini, Llama, etc. MODEL uses OpenRouter's vendor/model
-    slugs, e.g. anthropic/claude-sonnet-4, openai/gpt-4o-mini.
+    slugs, e.g. anthropic/claude-sonnet-4.6, openai/gpt-5.6-terra.
   - LLM_PROVIDER=vllm — a self-hosted OpenAI-compatible endpoint (e.g. vLLM on
     RunPod). MODEL is whatever model id vLLM is serving.
 
@@ -24,7 +24,7 @@ import os
 from openai import AsyncOpenAI
 
 PROVIDER = os.getenv("LLM_PROVIDER", "openrouter").lower()
-MODEL_DEFAULT = os.getenv("MODEL", "anthropic/claude-sonnet-4")
+MODEL_DEFAULT = os.getenv("MODEL", "anthropic/claude-sonnet-4.6")
 
 _client: AsyncOpenAI | None = None
 
