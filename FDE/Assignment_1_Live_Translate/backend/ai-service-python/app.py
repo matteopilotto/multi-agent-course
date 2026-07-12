@@ -28,7 +28,7 @@ from lib.logger import get_logger
 
 load_dotenv()
 
-MODEL = os.getenv("MODEL", "anthropic/claude-sonnet-4")
+MODEL = os.getenv("MODEL", "anthropic/claude-sonnet-4.6")
 DB_PATH = os.getenv("TRANSLATION_DB_PATH", "translations.db")
 BATCH_CONCURRENCY = int(os.getenv("BATCH_CONCURRENCY", "8"))
 
