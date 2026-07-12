@@ -14,6 +14,7 @@ TODOs so the widget lights up. Run:
     cp .env.example .env          # then add your API key
     uvicorn app:app --reload --port 8000
 """
+import asyncio
 import os
 import time
 
@@ -29,6 +30,7 @@ load_dotenv()
 
 MODEL = os.getenv("MODEL", "claude-sonnet-4-6")
 DB_PATH = os.getenv("TRANSLATION_DB_PATH", "translations.db")
+BATCH_CONCURRENCY = int(os.getenv("BATCH_CONCURRENCY", "8"))
 
 app = FastAPI(title="FDE Live Translate — AI Service")
 log = get_logger("ai-service")
@@ -94,9 +96,34 @@ async def translate(body: TranslateIn, request: Request):
 async def translate_batch(body: BatchIn, request: Request):
     request_id = request.headers.get("x-request-id")
     t0 = time.perf_counter()
-    results = []
+
+    sem = asyncio.Semaphore(BATCH_CONCURRENCY)
+
+    async def guarded(text: str) -> dict:
+        async with sem:
+            return await translate_one(text, body.target)
+
+    # keys in original order; dedup on the stripped form (cache-key semantics)
+    keys = [(t or "").strip() for t in body.texts]
+    rep: dict[str, str] = {}
     for t in body.texts:
-        results.append(await translate_one(t, body.target))
+        rep.setdefault((t or "").strip(), t)
+    unique_keys = list(rep.keys())
+
+    # concurrent, bounded; any provider error propagates -> 502 (fail loud)
+    done = await asyncio.gather(*(guarded(rep[k]) for k in unique_keys))
+    by_key = dict(zip(unique_keys, done))
+
+    # fan back out in original order; mark 2nd+ occurrences of a key as a hit
+    results, seen = [], set()
+    for k in keys:
+        r = by_key[k]
+        if k in seen:
+            r = {**r, "cached": True}  # duplicate within batch == effectively cached
+        else:
+            seen.add(k)
+        results.append(r)
+
     latency = int((time.perf_counter() - t0) * 1000)
     hits = sum(1 for r in results if r["cached"])
     log.info(
