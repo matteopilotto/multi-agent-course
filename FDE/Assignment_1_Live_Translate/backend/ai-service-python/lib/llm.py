@@ -9,7 +9,7 @@ This keeps one request shape and one response-parsing path; switching
 providers/models is purely `LLM_PROVIDER` + `MODEL` + API key, no code change.
 
   - LLM_PROVIDER=openrouter (default) — https://openrouter.ai/api/v1, one API
-    for Claude, GPT, Gemini, Llama, etc. MODEL uses OpenRouter's vendor/model
+    for Claude, GPT, Gemini, etc. MODEL uses OpenRouter's vendor/model
     slugs, e.g. anthropic/claude-sonnet-4.6, openai/gpt-5.6-terra.
   - LLM_PROVIDER=vllm — a self-hosted OpenAI-compatible endpoint (e.g. vLLM on
     RunPod). MODEL is whatever model id vLLM is serving.
