@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "FDE Live Translate (EN → Mexican Spanish)",
+  "name": "FDE Live Translate (EN → 5 languages)",
   "version": "1.0.0",
-  "description": "Assignment 1 widget: live, on-demand English→Mexican-Spanish translation on any page.",
+  "description": "Assignment 1 widget: live, on-demand English translation into Spanish (Mexico or Spain), Italian, French, or German on any page.",
   "permissions": ["activeTab", "storage", "scripting"],
   "host_permissions": ["http://localhost:8787/*", "<all_urls>"],
   "content_scripts": [

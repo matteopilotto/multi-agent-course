@@ -14,13 +14,19 @@ async function sendToTab(type) {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
-  chrome.storage.sync.get({ apiUrl: DEFAULT_URL }, (cfg) => {
+  chrome.storage.sync.get({ apiUrl: DEFAULT_URL, target: "es-MX" }, (cfg) => {
     $("apiUrl").value = cfg.apiUrl;
+    $("target").value = cfg.target;
   });
 
   $("save").addEventListener("click", () => {
     const apiUrl = $("apiUrl").value.trim() || DEFAULT_URL;
-    chrome.storage.sync.set({ apiUrl }, () => setStatus("Saved. Reload the page to apply.", "ok"));
+    const target = $("target").value;
+    chrome.storage.sync.set({ apiUrl, target }, () => setStatus("Saved. Reload the page to apply.", "ok"));
+  });
+
+  $("target").addEventListener("change", () => {
+    chrome.storage.sync.set({ target: $("target").value });
   });
 
   $("health").addEventListener("click", async () => {
