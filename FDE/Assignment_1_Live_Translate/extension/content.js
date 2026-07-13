@@ -10,16 +10,21 @@
  */
 (function () {
   try {
-    chrome.storage.sync.get({ apiUrl: "http://localhost:8787" }, (cfg) => {
-      window.FDE_CONFIG = Object.assign({}, window.FDE_CONFIG, { API_URL: cfg.apiUrl });
+    chrome.storage.sync.get({ apiUrl: "http://localhost:8787", target: "es-MX" }, (cfg) => {
+      window.FDE_CONFIG = Object.assign({}, window.FDE_CONFIG, { API_URL: cfg.apiUrl, TARGET: cfg.target });
     });
   } catch (_) {
     /* storage not available; widget falls back to its default */
   }
 
   chrome.storage.onChanged.addListener((changes, area) => {
-    if (area === "sync" && changes.apiUrl) {
+    if (area !== "sync") return;
+    if (changes.apiUrl) {
       window.FDE_CONFIG = Object.assign({}, window.FDE_CONFIG, { API_URL: changes.apiUrl.newValue });
+      window.dispatchEvent(new Event("FDE_CONFIG_CHANGED"));
+    }
+    if (changes.target) {
+      window.FDE_CONFIG = Object.assign({}, window.FDE_CONFIG, { TARGET: changes.target.newValue });
       window.dispatchEvent(new Event("FDE_CONFIG_CHANGED"));
     }
   });
