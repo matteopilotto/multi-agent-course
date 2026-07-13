@@ -50,12 +50,23 @@ def _get_client() -> AsyncOpenAI:
     return _client
 
 
-SYSTEM_PROMPT = (
-    "You are a professional translator. Translate the user's English text "
-    "into natural MEXICAN Spanish (es-MX) — not generic or Castilian Spanish. "
-    "Return ONLY the translation — no preamble, no notes, no wrapping quotes. "
-    "Keep numbers, prices (with $), and product/model codes unchanged."
-)
+LANG_INSTRUCTIONS = {
+    "es-MX": "natural MEXICAN Spanish (es-MX) — not generic or Castilian Spanish",
+    "es-ES": "natural Castilian Spanish (es-ES) as spoken in Spain — not Latin-American Spanish",
+    "it": "natural Italian (it)",
+    "fr": "natural French (fr)",
+    "de": "natural German (de)",
+}
+
+
+def _system_prompt(target: str) -> str:
+    instruction = LANG_INSTRUCTIONS.get(target, LANG_INSTRUCTIONS["es-MX"])
+    return (
+        f"You are a professional translator. Translate the user's English text "
+        f"into {instruction}. "
+        "Return ONLY the translation — no preamble, no notes, no wrapping quotes. "
+        "Keep numbers, prices (with $), and product/model codes unchanged."
+    )
 
 
 async def translate_text(text: str, target: str = "es-MX", model: str = MODEL_DEFAULT) -> str:
@@ -64,7 +75,7 @@ async def translate_text(text: str, target: str = "es-MX", model: str = MODEL_DE
         model=model,
         max_tokens=1024,
         messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": _system_prompt(target)},
             {"role": "user", "content": text},
         ],
     )
