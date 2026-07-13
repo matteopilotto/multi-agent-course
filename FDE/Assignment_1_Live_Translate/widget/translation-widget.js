@@ -35,9 +35,18 @@
     window.FDE_CONFIG || {}
   );
 
+  const LANGUAGES = [
+    { label: "Spanish (Mexico)", code: "es-MX" },
+    { label: "Spanish (Spain)", code: "es-ES" },
+    { label: "Italian", code: "it" },
+    { label: "French", code: "fr" },
+    { label: "German", code: "de" },
+  ];
+
   // ---- state --------------------------------------------------------------
   let panelOpen = false;
   let busy = false;
+  let currentTarget = CONFIG.TARGET;
   const originalText = new Map(); // textNode -> original string (for Restore)
 
   // ---- icons (Tabler glyphs — no emoji, no hand-drawn paths) --------------
@@ -91,6 +100,10 @@
   .fde-badge.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-weight:500}
   .fde-badge.hit{background:#dcfce7;color:#15803d}
 
+  .fde-select{width:100%;border:1px solid rgba(9,9,11,.14);background:#fff;color:#18181b;
+    border-radius:10px;padding:9px 10px;font:inherit;font-weight:600;cursor:pointer}
+  .fde-select:focus-visible{outline:2px solid #10b981;outline-offset:2px}
+
   .fde-row{display:flex;gap:8px}
   .fde-btn{flex:1;display:inline-flex;align-items:center;justify-content:center;
     border:1px solid rgba(9,9,11,.14);background:#fff;color:#18181b;border-radius:10px;
@@ -119,6 +132,7 @@
     .fde-btn.primary{background:#fafafa;color:#0b0b0c;border-color:#fafafa}
     .fde-btn.primary:hover{background:#e4e4e7}
     .fde-btn.ghost{background:transparent;color:#a1a1aa;border-color:transparent}
+    .fde-select{background:#27272a;color:#f4f4f5;border-color:rgba(255,255,255,.12)}
     .fde-status{color:#a1a1aa}
   }
   @media (prefers-reduced-motion: reduce){
@@ -144,12 +158,17 @@
       <span class="fde-hicon">${ICON_LANG}</span>
       <div>
         <div class="fde-title">Live Translate</div>
-        <div class="fde-sub">English to Mexican Spanish</div>
+        <div class="fde-sub">Translate this page into another language</div>
       </div>
       <button class="fde-x" type="button" aria-label="Close">${ICON_X}</button>
     </div>
     <div class="fde-body">
-      <p class="fde-lead">Translate this page into Mexican Spanish, then restore it anytime.</p>
+      <p class="fde-lead">Pick a language, translate this page, then restore it anytime.</p>
+      <select class="fde-select" id="fde-lang" aria-label="Target language">
+        ${LANGUAGES.map(
+          (l) => `<option value="${l.code}"${l.code === currentTarget ? " selected" : ""}>${l.label}</option>`
+        ).join("")}
+      </select>
       <div class="fde-badges" id="fde-badges"></div>
       <button class="fde-btn primary" id="fde-page" type="button">Translate page</button>
       <button class="fde-btn ghost" id="fde-restore" type="button">Restore page</button>
@@ -162,12 +181,16 @@
   const badges = panel.querySelector("#fde-badges");
   const statusEl = panel.querySelector("#fde-status");
   const pageBtn = panel.querySelector("#fde-page");
+  const langSelect = panel.querySelector("#fde-lang");
 
   // ---- events -------------------------------------------------------------
   fab.addEventListener("click", togglePanel);
   panel.querySelector(".fde-x").addEventListener("click", () => setPanel(false));
   pageBtn.addEventListener("click", translatePage);
   panel.querySelector("#fde-restore").addEventListener("click", restorePage);
+  langSelect.addEventListener("change", () => {
+    currentTarget = langSelect.value;
+  });
 
   // Extension popup drives the widget through window events (see extension/content.js)
   window.addEventListener("FDE_TRANSLATE_PAGE", translatePage);
@@ -201,7 +224,7 @@
       for (let i = 0; i < nodes.length; i += CONFIG.BATCH_SIZE) {
         const slice = nodes.slice(i, i + CONFIG.BATCH_SIZE);
         const texts = slice.map((n) => n.nodeValue.trim());
-        const r = await postJSON("/translate/batch", { texts, target: CONFIG.TARGET });
+        const r = await postJSON("/translate/batch", { texts, target: currentTarget });
         const results = r.results || [];
         if (typeof r.latencyMs === "number") totalMs += r.latencyMs;
         slice.forEach((n, j) => {
