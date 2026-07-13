@@ -1,16 +1,18 @@
 """
-lib/llm.py — the LLM translation call  (TODO: you implement)
-============================================================
+lib/llm.py — the LLM translation call
+======================================
 One job: turn an English string into Mexican Spanish using an LLM.
 
-Provider is your choice. The default example below is Anthropic Claude
-(`pip install anthropic`, set ANTHROPIC_API_KEY). Hamza's launched version
-used Google Gemini — either is fine. Whatever you pick:
+Everything routes through a single OpenAI-compatible client (`AsyncOpenAI`),
+including Anthropic models — reached via OpenRouter like any other vendor.
+This keeps one request shape and one response-parsing path; switching
+providers/models is purely `LLM_PROVIDER` + `MODEL` + API key, no code change.
 
-  - Write a PROMPT that pins the register to Mexican Spanish (es-MX), not
-    generic/Castilian Spanish. Ask for ONLY the translation, no preamble.
-  - Keep numbers, prices ($), and product/model codes unchanged.
-  - Return a clean string (strip quotes/whitespace the model may add).
+  - LLM_PROVIDER=openrouter (default) — https://openrouter.ai/api/v1, one API
+    for Claude, GPT, Gemini, etc. MODEL uses OpenRouter's vendor/model
+    slugs, e.g. anthropic/claude-sonnet-4.6, openai/gpt-5.6-terra.
+  - LLM_PROVIDER=vllm — a self-hosted OpenAI-compatible endpoint (e.g. vLLM on
+    RunPod). MODEL is whatever model id vLLM is serving.
 
 FAIL LOUD: do NOT wrap the call in a try/except that returns `text` on error.
 If the provider fails, let the exception propagate so the caller returns a 502.
@@ -19,19 +21,32 @@ assignment (and a real production bug — it ships English while looking healthy
 """
 import os
 
-from anthropic import AsyncAnthropic
+from openai import AsyncOpenAI
 
-MODEL_DEFAULT = os.getenv("MODEL", "claude-sonnet-4-6")
+MODEL_DEFAULT = os.getenv("MODEL", "anthropic/claude-sonnet-4.6")
 
-_client: AsyncAnthropic | None = None
+_client: AsyncOpenAI | None = None
 
 
-def _get_client() -> AsyncAnthropic:
-    # Built lazily (not at import time) so ANTHROPIC_API_KEY is read after
-    # app.py's load_dotenv() has run, regardless of import order.
+def _get_client() -> AsyncOpenAI:
+    # Built lazily (not at import time), and LLM_PROVIDER is read here rather
+    # than as a module-level constant, so both are read after app.py's
+    # load_dotenv() has run, regardless of import order.
     global _client
     if _client is None:
-        _client = AsyncAnthropic()  # reads ANTHROPIC_API_KEY
+        provider = os.getenv("LLM_PROVIDER", "openrouter").lower()
+        if provider == "openrouter":
+            _client = AsyncOpenAI(
+                base_url="https://openrouter.ai/api/v1",
+                api_key=os.getenv("OPENROUTER_API_KEY"),
+            )
+        elif provider == "vllm":
+            _client = AsyncOpenAI(
+                base_url=os.getenv("VLLM_BASE_URL"),
+                api_key=os.getenv("VLLM_API_KEY", "EMPTY"),  # vLLM often ignores the key
+            )
+        else:
+            raise ValueError(f"Unknown LLM_PROVIDER: {provider!r}")
     return _client
 
 
@@ -45,10 +60,12 @@ SYSTEM_PROMPT = (
 
 async def translate_text(text: str, target: str = "es-MX", model: str = MODEL_DEFAULT) -> str:
     """Return `text` translated into `target` (Mexican Spanish by default)."""
-    msg = await _get_client().messages.create(
+    resp = await _get_client().chat.completions.create(
         model=model,
         max_tokens=1024,
-        system=SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": text}],
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": text},
+        ],
     )
-    return msg.content[0].text.strip()
+    return resp.choices[0].message.content.strip()
