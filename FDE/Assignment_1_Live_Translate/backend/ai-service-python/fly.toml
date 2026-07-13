@@ -7,9 +7,16 @@ app = 'ai-service-python'
 primary_region = 'iad'
 
 [build]
+
+# Private service: this app has NO public IP. It is reachable only from inside
+# the Fly org over Flycast, at http://ai-service-python.flycast (the gateway
+# points AI_SERVICE_URL here). Keep the [http_service] block so traffic still
+# goes through the Fly proxy — that's what lets a stopped machine auto-start
+# on the next request. force_https is off because Flycast traffic is plain
+# HTTP on the private network; there's no public TLS to enforce.
 [http_service]
   internal_port = 8000
-  force_https = true
+  force_https = false
   auto_stop_machines = 'stop'
   auto_start_machines = true
   min_machines_running = 0
