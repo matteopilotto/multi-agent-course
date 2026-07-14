@@ -15,6 +15,7 @@
  */
 const express = require("express");
 const cors = require("cors");
+const rateLimit = require("express-rate-limit");
 const path = require("path");
 const crypto = require("crypto");
 const fs = require("fs");
@@ -32,6 +33,7 @@ const AI_SERVICE_URL = process.env.AI_SERVICE_URL || "http://localhost:8000";
 const WIDGET_PATH = path.join(__dirname, "..", "..", "widget", "translation-widget.js");
 
 const app = express();
+app.set("trust proxy", true);
 const startedAt = Date.now();
 
 // --- middleware ----------------------------------------------------------
@@ -52,6 +54,23 @@ app.use((req, res, next) => {
   });
   next();
 });
+
+// --- per-IP rate limiting on the translate routes -------------------------
+const translateLimiter = rateLimit({
+  windowMs: Number(process.env.RATE_LIMIT_WINDOW_MS) || 60_000,
+  max: Number(process.env.RATE_LIMIT_MAX) || 120,
+  standardHeaders: true, // RateLimit-* + Retry-After
+  legacyHeaders: false,
+  // Fly forwards the real client IP here; fall back to req.ip locally / in docker-compose.
+  keyGenerator: (req) => req.get("fly-client-ip") || req.ip,
+  validate: { trustProxy: false }, // we handle proxy IP explicitly above
+  handler: (req, res) => {
+    const retryAfterSec = Math.ceil((Number(process.env.RATE_LIMIT_WINDOW_MS) || 60_000) / 1000);
+    logLine({ event: "rate_limit", ip: req.get("fly-client-ip") || req.ip, url: req.originalUrl, requestId: req.requestId });
+    res.status(429).json({ error: "Too many requests — please slow down and try again in a moment.", retryAfterSec });
+  },
+});
+app.use("/translate", translateLimiter);
 
 // --- serve the widget to the console loader ------------------------------
 app.get("/widget.js", (req, res) => {

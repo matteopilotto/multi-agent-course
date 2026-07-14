@@ -276,6 +276,10 @@
       body: JSON.stringify(body),
     });
     if (res.status === 501) throw new NotImplemented(path);
+    if (res.status === 429) {
+      const body = await res.json().catch(() => ({}));
+      throw new RateLimited(body.error, res.headers.get("Retry-After"));
+    }
     if (!res.ok) throw new Error("HTTP " + res.status);
     return res.json();
   }
@@ -314,6 +318,8 @@
   function handleError(err) {
     if (err instanceof NotImplemented) {
       setStatus(`${err.path} isn't implemented yet — build it in your backend!`, true);
+    } else if (err instanceof RateLimited) {
+      setStatus(err.message || "You're translating too fast — please wait a few seconds and try again.", true);
     } else if (err.message && err.message.startsWith("HTTP")) {
       setStatus(`Backend error (${err.message}). Check your gateway/AI-service logs.`, true);
     } else {
@@ -332,6 +338,12 @@
     this.name = "NotImplemented";
   }
   NotImplemented.prototype = Object.create(Error.prototype);
+  function RateLimited(message, retryAfter) {
+    this.message = message;
+    this.retryAfter = retryAfter;
+    this.name = "RateLimited";
+  }
+  RateLimited.prototype = Object.create(Error.prototype);
 
   console.log("%c[FDE] Live Translate widget loaded.", "color:#10b981;font-weight:bold");
   console.log("[FDE] Backend:", apiUrl(), "· open the button bottom-right.");
