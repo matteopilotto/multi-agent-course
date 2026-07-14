@@ -1,0 +1,12 @@
+backend/ai-service-python/
+**/node_modules/
+**/.venv/
+**/*.db
+**/*.log
+.git/
+extension/
+demo-pages/
+benchmark/
+diagrams/
+eval/
+**/.env
