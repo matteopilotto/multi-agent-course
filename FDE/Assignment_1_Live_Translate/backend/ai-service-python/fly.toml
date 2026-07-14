@@ -9,7 +9,10 @@ primary_region = 'iad'
 [build]
 [http_service]
   internal_port = 8000
-  force_https = true
+  # Flycast traffic is plain HTTP on the private 6PN network. With force_https
+  # the Fly proxy 301-redirects http://…flycast to https://…flycast, which has no
+  # valid internal TLS cert, so the gateway can't reach us. Keep this false.
+  force_https = false
   auto_stop_machines = 'stop'
   auto_start_machines = true
   min_machines_running = 0
