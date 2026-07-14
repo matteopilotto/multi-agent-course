@@ -204,6 +204,20 @@ popup. Your **live-website test must pass against the deployed gateway**, not lo
 > Keep the AI service private if you can (Fly private networking / `flycast`) so only the
 > gateway can reach it — the browser should only ever touch the gateway.
 
+### Run with Docker Compose
+
+For local dev, both services can also boot together with one command. Each service still
+needs its own `.env` — in particular `backend/ai-service-python/.env` must have a real
+`OPENROUTER_API_KEY`.
+
+```bash
+cd FDE/Assignment_1_Live_Translate
+docker compose up --build        # gateway :8787, ai-service :8000
+```
+
+The translation cache persists in a named volume across restarts (`docker compose down -v`
+to wipe it).
+
 ---
 
 ## Performance, SLAs & cost
