@@ -3,3 +3,17 @@ fly.toml
 __pycache__/
 .envrc
 .venv/
+.env
+.env.example
+*.db
+*.log
+README.md
+=
+Verified
+exporting
+p913e2ca503248bd0bc87da25a87f82c78593af0c2e3b7d6d03a7e3740289
+pu1a7c5ebb9c4
+pushin:deployment-01KXG4HV6X3V4949XTA9
+pushing
+resolve
+transferring
