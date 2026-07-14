@@ -236,7 +236,7 @@
     try {
       for (let i = 0; i < nodes.length; i += CONFIG.BATCH_SIZE) {
         const slice = nodes.slice(i, i + CONFIG.BATCH_SIZE);
-        const texts = slice.map((n) => n.nodeValue.trim());
+        const texts = slice.map((n) => (originalText.has(n) ? originalText.get(n) : n.nodeValue).trim());
         const r = await postJSON("/translate/batch", { texts, target: currentTarget });
         const results = r.results || [];
         if (typeof r.latencyMs === "number") totalMs += r.latencyMs;
