@@ -31,6 +31,7 @@
       API_URL: "http://localhost:8787", // your Node gateway
       TARGET: "es-MX", // Mexican Spanish
       BATCH_SIZE: 40, // nodes per /translate/batch call
+      MAX_CONCURRENCY: 5, // batches in flight at once (stays under the gateway's 120 req/min)
     },
     window.FDE_CONFIG || {}
   );
@@ -48,6 +49,40 @@
   let busy = false;
   let currentTarget = CONFIG.TARGET;
   const originalText = new Map(); // textNode -> original string (for Restore)
+
+  // Client-side translation cache: `${target}::${original}` -> translated.
+  // Repeat translations of the same string never cross the network. Mirrored
+  // into localStorage (per-origin, survives reloads) when available; the
+  // in-memory Map covers same-page re-translate even where storage is blocked.
+  const clientCache = new Map();
+  const LS_PREFIX = "fde:tx:";
+
+  function cacheKey(target, original) {
+    return `${target}::${original}`;
+  }
+  function cacheGet(target, original) {
+    const k = cacheKey(target, original);
+    if (clientCache.has(k)) return clientCache.get(k);
+    try {
+      const v = localStorage.getItem(LS_PREFIX + k);
+      if (v != null) {
+        clientCache.set(k, v); // promote to memory for next lookup
+        return v;
+      }
+    } catch (_) {
+      /* localStorage unavailable (private mode, sandboxed frame) — ignore */
+    }
+    return undefined;
+  }
+  function cacheSet(target, original, translated) {
+    const k = cacheKey(target, original);
+    clientCache.set(k, translated);
+    try {
+      localStorage.setItem(LS_PREFIX + k, translated);
+    } catch (_) {
+      /* quota exceeded or storage unavailable — memory cache still holds it */
+    }
+  }
 
   // ---- icons (Tabler glyphs — no emoji, no hand-drawn paths) --------------
   const ICON_LANG =
@@ -217,25 +252,49 @@
     busy = true;
     pageBtn.disabled = true;
     badges.innerHTML = "";
+    const target = currentTarget;
     let hits = 0,
       totalMs = 0;
     setStatus(`Translating page… (${nodes.length} text chunks)`);
     try {
-      for (let i = 0; i < nodes.length; i += CONFIG.BATCH_SIZE) {
-        const slice = nodes.slice(i, i + CONFIG.BATCH_SIZE);
-        const texts = slice.map((n) => (originalText.has(n) ? originalText.get(n) : n.nodeValue).trim());
-        const r = await postJSON("/translate/batch", { texts, target: currentTarget });
+      // Split nodes into client-cache hits (resolved locally, no network) and
+      // misses (the only texts that go to /translate/batch).
+      const misses = [];
+      for (const n of nodes) {
+        const original = (originalText.has(n) ? originalText.get(n) : n.nodeValue).trim();
+        const cached = cacheGet(target, original);
+        if (cached != null) {
+          if (!originalText.has(n)) originalText.set(n, n.nodeValue);
+          n.nodeValue = cached;
+          hits++;
+        } else {
+          misses.push({ node: n, original });
+        }
+      }
+      // Build all miss batches up front, then run them through a bounded
+      // worker pool. Each batch updates the DOM as it resolves, so the page
+      // fills in progressively instead of blocking on a sequential chain.
+      const slices = [];
+      for (let i = 0; i < misses.length; i += CONFIG.BATCH_SIZE) {
+        slices.push(misses.slice(i, i + CONFIG.BATCH_SIZE));
+      }
+      let done = 0;
+      await runPool(slices, CONFIG.MAX_CONCURRENCY, async (slice) => {
+        const texts = slice.map((m) => m.original);
+        const r = await postJSON("/translate/batch", { texts, target });
         const results = r.results || [];
         if (typeof r.latencyMs === "number") totalMs += r.latencyMs;
-        slice.forEach((n, j) => {
+        slice.forEach((m, j) => {
           const res = results[j];
           if (!res) return;
           if (res.cached) hits++;
-          if (!originalText.has(n)) originalText.set(n, n.nodeValue);
-          n.nodeValue = res.translated;
+          if (!originalText.has(m.node)) originalText.set(m.node, m.node.nodeValue);
+          m.node.nodeValue = res.translated;
+          cacheSet(target, m.original, res.translated); // seed client cache for repeats
         });
-        setStatus(`Translating page… ${Math.min(i + CONFIG.BATCH_SIZE, nodes.length)}/${nodes.length}`);
-      }
+        done += slice.length;
+        setStatus(`Translating page… ${Math.min(done, misses.length)}/${misses.length}`);
+      });
       renderSummary(nodes.length, hits, totalMs);
       setStatus(`Page translated. Click "Restore page" to undo.`);
     } catch (err) {
@@ -253,6 +312,28 @@
     originalText.clear();
     badges.innerHTML = "";
     setStatus("Page restored to English.");
+  }
+
+  // ---- concurrency --------------------------------------------------------
+  // Run `worker` over `items` with at most `concurrency` in flight. Stops
+  // scheduling new items after the first error, waits for in-flight work to
+  // settle, then rethrows it (matches the old loop's fail-fast behavior).
+  async function runPool(items, concurrency, worker) {
+    let idx = 0;
+    let firstErr = null;
+    const runner = async () => {
+      while (idx < items.length && !firstErr) {
+        const cur = items[idx++];
+        try {
+          await worker(cur);
+        } catch (e) {
+          if (!firstErr) firstErr = e;
+        }
+      }
+    };
+    const n = Math.max(1, Math.min(concurrency, items.length));
+    await Promise.all(Array.from({ length: n }, runner));
+    if (firstErr) throw firstErr;
   }
 
   // ---- backend I/O --------------------------------------------------------
