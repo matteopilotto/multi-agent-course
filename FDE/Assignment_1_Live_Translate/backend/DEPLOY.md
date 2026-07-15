@@ -41,8 +41,12 @@ fly redis update livetranslate-cache --replica-regions sjc
 Wire the URL + backend selector onto the **AI service only**:
 
 ```bash
+# Use the exact "Private URL" that `fly redis status livetranslate-cache` prints.
+# On Fly's private network this is a plaintext redis:// URL on port 6379 (NOT
+# rediss://) — the WireGuard mesh already encrypts it, and the AI service reaches
+# it privately, so there's no public TLS endpoint to use here.
 fly secrets set \
-  REDIS_URL='rediss://default:<password>@<host>:<port>' \
+  REDIS_URL='redis://default:<password>@fly-livetranslate-cache.upstash.io:6379' \
   CACHE_BACKEND=redis \
   --app ai-service-python
 # Optional key expiry (blank = no expiry, the default):
@@ -60,12 +64,26 @@ fly secrets set \
 the primary region (`iad`)** on each app so the hot path never pays a cold start. Fly
 applies that floor to the primary region only, so `sjc` scales to 0 when idle.
 
-After deploying the new images (C3), place machines in both regions:
+After deploying the new images (C3), place a machine in `sjc` on each app.
+
+> ⚠️ **Do not use `fly scale count 2 --region iad,sjc`.** It sets the *group total*
+> to 2 and treats the region list as merely eligible, so it packs both machines into
+> the primary (`iad`) and leaves `sjc` empty — verify with `fly scale show`. Clone an
+> existing `iad` machine into `sjc` instead; it copies the machine's config and secrets
+> deterministically:
 
 ```bash
-fly scale count 2 --region iad,sjc --app ai-service-python
-fly scale count 2 --region iad,sjc --app matteopilotto-livetranslate-gw
+# Grab a started machine ID per app from `fly machines list`, then clone it to sjc:
+fly machine clone <iad-machine-id> --region sjc --app ai-service-python
+fly machine clone <iad-machine-id> --region sjc --app matteopilotto-livetranslate-gw
+
+# Confirm each app now reports iad + sjc (not iad only):
+fly scale show --app ai-service-python
+fly scale show --app matteopilotto-livetranslate-gw
 ```
+
+The cloned `sjc` machines inherit `auto_stop_machines = 'stop'`, and `min_machines_running`
+pins the primary region only, so `sjc` correctly scales to 0 when idle.
 
 No gateway code change is needed: `AI_SERVICE_URL=http://ai-service-python.flycast`
 is region-aware and Flycast routes each gateway machine to the nearest healthy AI
@@ -88,9 +106,10 @@ fly deploy --app matteopilotto-livetranslate-gw
 # 2. Set Redis secrets on the AI service (C1) — triggers a rolling restart.
 #    (safe to run before step 1 too; either order works.)
 
-# 3. Scale both apps into iad + sjc (C2).
-fly scale count 2 --region iad,sjc --app ai-service-python
-fly scale count 2 --region iad,sjc --app matteopilotto-livetranslate-gw
+# 3. Add an sjc machine to each app by cloning an iad machine (C2 — do NOT use
+#    `fly scale count … --region iad,sjc`, which packs both into iad).
+fly machine clone <iad-machine-id> --region sjc --app ai-service-python
+fly machine clone <iad-machine-id> --region sjc --app matteopilotto-livetranslate-gw
 ```
 
 ---
@@ -104,7 +123,7 @@ global limiting matters, back it with `rate-limit-redis` against the same Upstas
 instance:
 
 ```bash
-fly secrets set REDIS_URL='rediss://…' --app matteopilotto-livetranslate-gw
+fly secrets set REDIS_URL='redis://…' --app matteopilotto-livetranslate-gw   # same private URL
 # then wire rate-limit-redis into server.js as the limiter store.
 ```
 
