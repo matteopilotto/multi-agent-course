@@ -4,7 +4,10 @@
 #
 
 app = 'ai-service-python'
-primary_region = 'iad'
+# Multi-region: fra (EU, primary/warm) + iad (US-East, secondary). primary_region is
+# the region kept warm (see min_machines_running below); add the iad machine by
+# cloning an fra machine into iad — see backend/DEPLOY.md.
+primary_region = 'fra'
 
 [build]
 
@@ -19,7 +22,11 @@ primary_region = 'iad'
   force_https = false
   auto_stop_machines = 'stop'
   auto_start_machines = true
-  min_machines_running = 0
+  # Keep one machine warm in the primary region (fra) so the gateway's first
+  # Flycast call never pays an AI-service cold start on the hot path. Fly applies
+  # min_machines_running to the primary region only, so iad (US-East) still scales
+  # to 0 when idle — trading a one-time cold start there for lower cost.
+  min_machines_running = 1
   processes = ['app']
 
 [[vm]]
