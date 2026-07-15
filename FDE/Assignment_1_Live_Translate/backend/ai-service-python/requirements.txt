@@ -3,6 +3,9 @@ uvicorn[standard]==0.30.6
 python-dotenv==1.0.1
 aiosqlite==0.20.0
 
+# --- persistent cache tier (CACHE_BACKEND=redis); sqlite backend needs none ---
+redis==5.0.8
+
 # --- LLM provider: OpenAI-compatible client, used for OpenRouter and vLLM ---
 openai==1.109.1
 # google-genai==0.8.0

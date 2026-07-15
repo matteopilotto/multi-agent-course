@@ -48,8 +48,13 @@ class BatchIn(BaseModel):
 
 @app.on_event("startup")
 async def startup():
+    # Picks the persistent tier from CACHE_BACKEND (sqlite|redis). On a Redis
+    # connect failure this raises and startup fails loud (no silent fallback).
     await cache.init()
-    log.info("ai_service_started", extra={"model": MODEL, "db": DB_PATH})
+    log.info(
+        "ai_service_started",
+        extra={"model": MODEL, "cacheBackend": cache.backend, "db": DB_PATH},
+    )
 
 
 # --- core: translate one string --------------------------------------------
