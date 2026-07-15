@@ -49,6 +49,40 @@
   let currentTarget = CONFIG.TARGET;
   const originalText = new Map(); // textNode -> original string (for Restore)
 
+  // Client-side translation cache: `${target}::${original}` -> translated.
+  // Repeat translations of the same string never cross the network. Mirrored
+  // into localStorage (per-origin, survives reloads) when available; the
+  // in-memory Map covers same-page re-translate even where storage is blocked.
+  const clientCache = new Map();
+  const LS_PREFIX = "fde:tx:";
+
+  function cacheKey(target, original) {
+    return `${target}::${original}`;
+  }
+  function cacheGet(target, original) {
+    const k = cacheKey(target, original);
+    if (clientCache.has(k)) return clientCache.get(k);
+    try {
+      const v = localStorage.getItem(LS_PREFIX + k);
+      if (v != null) {
+        clientCache.set(k, v); // promote to memory for next lookup
+        return v;
+      }
+    } catch (_) {
+      /* localStorage unavailable (private mode, sandboxed frame) — ignore */
+    }
+    return undefined;
+  }
+  function cacheSet(target, original, translated) {
+    const k = cacheKey(target, original);
+    clientCache.set(k, translated);
+    try {
+      localStorage.setItem(LS_PREFIX + k, translated);
+    } catch (_) {
+      /* quota exceeded or storage unavailable — memory cache still holds it */
+    }
+  }
+
   // ---- icons (Tabler glyphs — no emoji, no hand-drawn paths) --------------
   const ICON_LANG =
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h7"/><path d="M9 3v2c0 4.418 -2.239 8 -5 8"/><path d="M5 9c0 2.144 2.952 3.908 6.7 4"/><path d="M12 20l4 -9l4 9"/><path d="M19.1 18h-6.2"/></svg>';
@@ -217,24 +251,40 @@
     busy = true;
     pageBtn.disabled = true;
     badges.innerHTML = "";
+    const target = currentTarget;
     let hits = 0,
       totalMs = 0;
     setStatus(`Translating page… (${nodes.length} text chunks)`);
     try {
-      for (let i = 0; i < nodes.length; i += CONFIG.BATCH_SIZE) {
-        const slice = nodes.slice(i, i + CONFIG.BATCH_SIZE);
-        const texts = slice.map((n) => (originalText.has(n) ? originalText.get(n) : n.nodeValue).trim());
-        const r = await postJSON("/translate/batch", { texts, target: currentTarget });
+      // Split nodes into client-cache hits (resolved locally, no network) and
+      // misses (the only texts that go to /translate/batch).
+      const misses = [];
+      for (const n of nodes) {
+        const original = (originalText.has(n) ? originalText.get(n) : n.nodeValue).trim();
+        const cached = cacheGet(target, original);
+        if (cached != null) {
+          if (!originalText.has(n)) originalText.set(n, n.nodeValue);
+          n.nodeValue = cached;
+          hits++;
+        } else {
+          misses.push({ node: n, original });
+        }
+      }
+      for (let i = 0; i < misses.length; i += CONFIG.BATCH_SIZE) {
+        const slice = misses.slice(i, i + CONFIG.BATCH_SIZE);
+        const texts = slice.map((m) => m.original);
+        const r = await postJSON("/translate/batch", { texts, target });
         const results = r.results || [];
         if (typeof r.latencyMs === "number") totalMs += r.latencyMs;
-        slice.forEach((n, j) => {
+        slice.forEach((m, j) => {
           const res = results[j];
           if (!res) return;
           if (res.cached) hits++;
-          if (!originalText.has(n)) originalText.set(n, n.nodeValue);
-          n.nodeValue = res.translated;
+          if (!originalText.has(m.node)) originalText.set(m.node, m.node.nodeValue);
+          m.node.nodeValue = res.translated;
+          cacheSet(target, m.original, res.translated); // seed client cache for repeats
         });
-        setStatus(`Translating page… ${Math.min(i + CONFIG.BATCH_SIZE, nodes.length)}/${nodes.length}`);
+        setStatus(`Translating page… ${Math.min(i + CONFIG.BATCH_SIZE, misses.length)}/${misses.length}`);
       }
       renderSummary(nodes.length, hits, totalMs);
       setStatus(`Page translated. Click "Restore page" to undo.`);
