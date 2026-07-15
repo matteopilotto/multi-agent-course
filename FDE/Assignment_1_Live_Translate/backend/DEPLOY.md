@@ -33,7 +33,9 @@ Optionally add a **read replica in `sjc`** so US-West AI machines don't cross-re
 L2 misses (the in-memory L1 tier absorbs repeats regardless):
 
 ```bash
-fly redis update livetranslate-cache --add-region sjc
+# --replica-regions takes the full comma-separated list of replica regions (it
+# replaces the set, it doesn't append), so list every replica you want each time.
+fly redis update livetranslate-cache --replica-regions sjc
 ```
 
 Wire the URL + backend selector onto the **AI service only**:
