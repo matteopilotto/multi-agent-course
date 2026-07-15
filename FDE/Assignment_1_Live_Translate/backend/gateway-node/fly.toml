@@ -4,10 +4,10 @@
 #
 
 app = 'matteopilotto-livetranslate-gw'
-# US multi-region: iad (US-East, primary) + sjc (US-West). Machines are added to
-# both regions with `fly scale count 2 --region iad,sjc` (see backend/DEPLOY.md).
-# Fly's Anycast routes each client to the nearest healthy gateway machine.
-primary_region = 'iad'
+# Multi-region: fra (EU, primary/warm) + iad (US-East, secondary). Fly's Anycast
+# routes each client to the nearest healthy gateway machine. Add the iad machine by
+# cloning an fra machine into iad — see backend/DEPLOY.md.
+primary_region = 'fra'
 
 [build]
 [http_service]
@@ -15,9 +15,9 @@ primary_region = 'iad'
   force_https = true
   auto_stop_machines = 'stop'
   auto_start_machines = true
-  # Keep one machine warm in the primary region (iad) so US-East users never hit a
-  # cold start on the public hot path. Applies to the primary region only, so sjc
-  # (US-West) scales to 0 when idle — one-time cold start there in exchange for cost.
+  # Keep one machine warm in the primary region (fra) so EU users never hit a cold
+  # start on the public hot path. Applies to the primary region only, so iad
+  # (US-East) scales to 0 when idle — one-time cold start there in exchange for cost.
   min_machines_running = 1
   processes = ['app']
 

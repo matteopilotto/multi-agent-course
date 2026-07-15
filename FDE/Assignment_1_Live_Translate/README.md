@@ -204,8 +204,8 @@ popup. Your **live-website test must pass against the deployed gateway**, not lo
 > Keep the AI service private if you can (Fly private networking / `flycast`) so only the
 > gateway can reach it — the browser should only ever touch the gateway.
 
-For the production topology this repo actually runs — **US multi-region (`iad` + `sjc`)**
-with a **shared Upstash Redis** cache tier — see the deploy runbook in
+For the production topology this repo actually runs — **multi-region (`fra` EU +
+`iad` US-East)** with a **shared Upstash Redis** cache tier — see the deploy runbook in
 [`backend/DEPLOY.md`](backend/DEPLOY.md).
 
 ### Run with Docker Compose
