@@ -6,3 +6,5 @@ livekit/.env
 livekit/node_modules/
 __pycache__/
 *.pyc
+private/
+logs/*.jsonl

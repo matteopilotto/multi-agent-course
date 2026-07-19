@@ -17,10 +17,11 @@ import argparse
 import os
 import subprocess
 import tempfile
-import time
+import uuid
 
 from agent import Agent
 from providers import make_provider
+from telemetry import TurnTrace, format_trace, write_trace
 
 try:
     from dotenv import load_dotenv
@@ -33,29 +34,9 @@ VAD_AGGRESSIVENESS = int(os.getenv("VAD_AGGRESSIVENESS", "2"))
 ENDPOINT_SILENCE_MS = int(os.getenv("ENDPOINT_SILENCE_MS", "600"))
 
 
-# --- Latency instrumentation: the point of the "measure the loop" segment ---
-
-class Stopwatch:
-    def __init__(self):
-        self.marks: dict[str, float] = {}
-        self._t = time.perf_counter()
-
-    def lap(self, stage: str) -> None:
-        now = time.perf_counter()
-        self.marks[stage] = (now - self._t) * 1000.0
-        self._t = now
-
-    def report(self) -> None:
-        total = sum(self.marks.values())
-        print("  ── turn latency ──")
-        for stage, ms in self.marks.items():
-            print(f"    {stage:<12} {ms:6.0f} ms")
-        print(f"    {'TOTAL':<12} {total:6.0f} ms  (target < ~800 ms)")
-
-
 # --- Audio (imported lazily so --text mode needs no audio libs) ---
 
-def record_utterance() -> bytes:
+def record_utterance(trace: TurnTrace) -> bytes:
     """Capture mic until the caller pauses (VAD endpointing). Returns 16-bit PCM."""
     import sounddevice as sd
     import webrtcvad
@@ -69,7 +50,8 @@ def record_utterance() -> bytes:
     started = False
     trailing_silence = 0
 
-    print("  (listening  -  speak, then pause)")
+    print("  (listening: speak, then pause)")
+    trace.event("vad.listening", aggressiveness=VAD_AGGRESSIVENESS)
     with sd.RawInputStream(samplerate=SAMPLE_RATE, blocksize=frame_len,
                            dtype="int16", channels=1) as stream:
         while True:
@@ -79,6 +61,8 @@ def record_utterance() -> bytes:
                 continue
             speech = vad.is_speech(frame, SAMPLE_RATE)
             if speech:
+                if not started:
+                    trace.event("vad.speech_started")
                 started = True
                 trailing_silence = 0
                 frames.append(frame)
@@ -86,6 +70,10 @@ def record_utterance() -> bytes:
                 trailing_silence += 1
                 frames.append(frame)
                 if trailing_silence >= silence_frames_needed:
+                    trace.event(
+                        "vad.endpoint_detected",
+                        endpointSilenceMs=ENDPOINT_SILENCE_MS,
+                    )
                     break
     return b"".join(frames)
 
@@ -111,6 +99,7 @@ def speak(provider: Provider, text: str) -> None:
 def run(text_mode: bool) -> None:
     provider = make_provider()
     agent = Agent(provider)
+    session_id = f"cli-{uuid.uuid4().hex[:10]}"
     print(f"Provider: {provider.name} | LLM: {provider.llm_model}")
     print("Call started. Say/type 'goodbye' or Ctrl-C to hang up.\n")
 
@@ -118,36 +107,39 @@ def run(text_mode: bool) -> None:
 
     while True:
         try:
-            sw = Stopwatch()
-
             if text_mode:
                 user_text = input("you> ")
+                trace = TurnTrace(session_id=session_id)
+                trace.event("input.text")
             else:
-                pcm = record_utterance()
-                user_text = provider.transcribe(pcm, SAMPLE_RATE)
+                trace = TurnTrace(session_id=session_id)
+                with trace.span("capture"):
+                    pcm = record_utterance(trace)
+                with trace.span("stt", model=getattr(provider, "stt_model", "unknown")):
+                    user_text = provider.transcribe(pcm, SAMPLE_RATE)
                 print(f"you> {user_text}")
-            sw.lap("stt")
             if not user_text.strip():
                 continue
 
-            reply, action = agent.respond(user_text)
-            sw.lap("llm+tools")
+            reply, action = agent.respond(user_text, trace=trace)
 
-            speak(provider, reply)
-            sw.lap("tts")
+            with trace.span("tts", model=getattr(provider, "tts_model", "unknown")):
+                speak(provider, reply)
 
-            sw.report()
+            payload = trace.finish(action=action, sources=agent.last_sources)
+            write_trace(payload)
+            print(format_trace(payload))
             print()
 
             if action == "hangup":
-                print("[call ended  -  SIP BYE]")
+                print("[call ended: SIP BYE]")
                 break
             if action == "transfer":
-                print("[transferring to front desk  -  SIP REFER to front-desk]")
+                print("[transferring to front desk: SIP REFER to front-desk]")
                 break
 
         except (EOFError, KeyboardInterrupt):
-            print("\n[caller hung up  -  SIP BYE]")
+            print("\n[caller hung up: SIP BYE]")
             break
 
 

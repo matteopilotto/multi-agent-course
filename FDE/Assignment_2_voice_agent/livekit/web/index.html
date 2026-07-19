@@ -3,97 +3,127 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Aurora LiveKit Talk Test</title>
+    <title>Aurora Voice Operations</title>
     <link rel="stylesheet" href="/web/styles.css" />
   </head>
   <body>
     <main>
       <header class="header">
         <div>
-          <p class="eyebrow">Local LiveKit</p>
-          <h1>Aurora Room Talk Test</h1>
+          <p class="eyebrow">Local LiveKit session</p>
+          <h1>Aurora Voice Operations</h1>
         </div>
-        <div class="room-pill">aurora-demo-room</div>
+        <div class="header-state">
+          <span class="status-pill" id="language">English</span>
+          <span class="status-pill" id="provider">Provider: loading</span>
+          <span class="status-pill">aurora-demo-room</span>
+        </div>
       </header>
 
-      <section class="stage" aria-label="LiveKit participants">
+      <section class="stage" aria-label="LiveKit call participants">
         <article class="participant-card" data-client="caller">
           <div class="card-top">
             <div>
-              <p class="eyebrow">Caller side</p>
+              <p class="eyebrow">Caller</p>
               <h2>Caller Demo</h2>
             </div>
-            <span class="state" data-role="status">Disconnected</span>
+            <span class="state" data-role="status">Ready</span>
           </div>
-          <div class="meter" aria-hidden="true">
-            <span></span>
-            <span></span>
-            <span></span>
-            <span></span>
+          <div class="waveform caller-wave" aria-hidden="true">
+            <span></span><span></span><span></span><span></span><span></span>
           </div>
-          <div class="actions">
-            <button data-role="join">Start call</button>
-            <button data-role="mute" disabled>Mute</button>
-            <button data-role="leave" class="secondary" disabled>Leave</button>
+          <div class="call-controls">
+            <button id="start-call" type="button">Start call</button>
+            <button id="mute-call" type="button" class="secondary" disabled>Mute</button>
+            <button id="end-call" type="button" class="danger" disabled>End call</button>
           </div>
-          <div class="audio" data-role="audio"></div>
         </article>
 
         <article class="participant-card agent" data-client="agent">
           <div class="card-top">
             <div>
-              <p class="eyebrow">Agent side</p>
+              <p class="eyebrow">Voice agent</p>
               <h2>Aurora Agent</h2>
             </div>
-            <span class="state" data-role="status">Disconnected</span>
+            <span class="state" data-role="status">Waiting</span>
           </div>
-          <div class="meter" aria-hidden="true">
-            <span></span>
-            <span></span>
-            <span></span>
-            <span></span>
+          <div class="waveform agent-wave" aria-hidden="true">
+            <span></span><span></span><span></span><span></span><span></span>
           </div>
-          <div class="actions">
-            <button data-role="join">Show agent in room</button>
-            <button data-role="mute" disabled>Mute</button>
-            <button data-role="leave" class="secondary" disabled>Leave</button>
-          </div>
-          <div class="audio" data-role="audio"></div>
+          <div id="voice-status" class="voice-status">Start the call, then speak naturally</div>
         </article>
       </section>
 
-      <section class="panel">
-        <div>
-          <p class="eyebrow">Room state</p>
-          <h2>Participants</h2>
+      <section class="workspace">
+        <div class="conversation-column">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Conversation</p>
+              <h2>Live transcript</h2>
+            </div>
+            <span class="listening-state" id="listening-state">Idle</span>
+          </div>
+          <div id="transcript" class="transcript" aria-live="polite">
+            <div class="empty">The call transcript will appear here.</div>
+          </div>
+          <div class="sources-block">
+            <p class="eyebrow">Grounding sources</p>
+            <div id="sources" class="sources">No retrieval used in the latest turn.</div>
+          </div>
         </div>
-        <div id="participants" class="participants">
-          <div class="empty">Join one or both panes to see participants.</div>
-        </div>
+
+        <aside class="operations-column">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Turn telemetry</p>
+              <h2>Runtime trace</h2>
+            </div>
+          </div>
+          <div class="metrics" aria-label="Turn latency metrics">
+            <div><span>STT</span><strong id="metric-stt">0 ms</strong></div>
+            <div><span>LLM</span><strong id="metric-llm">0 ms</strong></div>
+            <div><span>Tools</span><strong id="metric-tools">0 ms</strong></div>
+            <div><span>Server</span><strong id="metric-total">0 ms</strong></div>
+            <div><span>EOT to audio</span><strong id="metric-first-audio">0 ms</strong></div>
+            <div><span>Barge-in</span><strong id="metric-barge">0 ms</strong></div>
+          </div>
+          <div id="pipeline" class="pipeline" aria-label="Voice pipeline">
+            <span data-stage="vad">VAD</span>
+            <span data-stage="stt">STT</span>
+            <span data-stage="routing">Router</span>
+            <span data-stage="retrieval">RAG</span>
+            <span data-stage="llm">LLM</span>
+            <span data-stage="tools">Tools</span>
+            <span data-stage="tts">TTS</span>
+          </div>
+          <div id="events" class="events">
+            <div class="empty">Turn events will appear here.</div>
+          </div>
+          <div class="tuning">
+            <div class="tuning-heading">
+              <p class="eyebrow">Turn tuning</p>
+              <span id="vad-readout">Calibrating</span>
+            </div>
+            <label>
+              <span>Endpoint silence <strong id="endpoint-value">650 ms</strong></span>
+              <input id="endpoint-control" type="range" min="350" max="1200" step="50" value="650" />
+            </label>
+            <label>
+              <span>Speech sensitivity <strong id="sensitivity-value">3.2x</strong></span>
+              <input id="sensitivity-control" type="range" min="1.8" max="5" step="0.1" value="3.2" />
+            </label>
+          </div>
+        </aside>
       </section>
 
-      <section class="panel conversation-panel">
-        <div class="conversation-top">
-          <div>
-            <p class="eyebrow">Hotel agent brain</p>
-            <h2>Conversation</h2>
-          </div>
-          <div class="room-pill" id="provider">Provider: loading</div>
+      <section class="room-band">
+        <div>
+          <p class="eyebrow">Room state</p>
+          <h2>LiveKit participants</h2>
         </div>
-        <div id="transcript" class="transcript" aria-live="polite">
-          <div class="empty">Start the call, then speak naturally after the greeting.</div>
+        <div id="participants" class="participants">
+          <div class="empty">Participants join when the call starts.</div>
         </div>
-        <div id="voice-status" class="voice-status">Start call to begin listening</div>
-        <form id="agent-form" class="composer">
-          <input
-            id="caller-message"
-            type="text"
-            autocomplete="off"
-            placeholder="Typed fallback"
-          />
-          <button type="submit">Send to agent</button>
-          <button id="speak-toggle" type="button" class="secondary">Speak replies on</button>
-        </form>
       </section>
     </main>
 

@@ -1,0 +1,127 @@
+[
+  {
+    "id": "guardrail.weather",
+    "description": "Off-topic requests stay inside hotel reservations.",
+    "turns": [
+      {
+        "user": "Can you tell me the weather?",
+        "expect": {
+          "contains": "hotel reservations",
+          "tools": [],
+          "language": "en"
+        }
+      }
+    ]
+  },
+  {
+    "id": "booking.availability",
+    "description": "Availability comes from the business tool.",
+    "turns": [
+      {
+        "user": "I need a room from August 12 to August 14 for two guests.",
+        "expect": {
+          "contains": "Standard Queen",
+          "tools": ["check_availability"],
+          "language": "en"
+        }
+      }
+    ]
+  },
+  {
+    "id": "grounding.cancellation",
+    "description": "Hotel policy answers are retrieved from the local knowledge base.",
+    "turns": [
+      {
+        "user": "What is the cancellation policy?",
+        "expect": {
+          "contains": "6:00 PM",
+          "tools": ["search_hotel_knowledge"],
+          "sourceContains": "hotel_policies.md#Cancellation"
+        }
+      }
+    ]
+  },
+  {
+    "id": "grounding.after_off_topic",
+    "description": "A policy question retrieves knowledge after an off-topic refusal.",
+    "turns": [
+      {
+        "user": "What is today's FIFA score?",
+        "expect": {
+          "contains": "hotel reservations",
+          "tools": []
+        }
+      },
+      {
+        "user": "Sure, what does the cancellation policy look like?",
+        "expect": {
+          "contains": "6:00 PM",
+          "tools": ["search_hotel_knowledge"],
+          "sourceContains": "hotel_policies.md#Cancellation"
+        }
+      }
+    ]
+  },
+  {
+    "id": "router.language_switch",
+    "description": "The same session can switch to Spanish.",
+    "turns": [
+      {
+        "user": "Please speak Spanish.",
+        "expect": {
+          "contains": "Claro",
+          "language": "es",
+          "tools": ["set_language"]
+        }
+      },
+      {
+        "user": "Necesito una habitación para dos personas.",
+        "expect": {
+          "contains": "¿Quiere",
+          "tools": ["check_availability"],
+          "language": "es"
+        }
+      },
+      {
+        "user": "Let me switch back to English.",
+        "expect": {
+          "language": "en",
+          "tools": ["set_language"]
+        }
+      },
+      {
+        "user": "¡Gracias!",
+        "expect": {
+          "language": "en",
+          "tools": []
+        }
+      }
+    ]
+  },
+  {
+    "id": "control.transfer",
+    "description": "A human request produces the transfer control action.",
+    "turns": [
+      {
+        "user": "Connect me to a person.",
+        "expect": {
+          "action": "transfer",
+          "tools": ["transfer_to_human"]
+        }
+      }
+    ]
+  },
+  {
+    "id": "control.hangup",
+    "description": "A completed call produces the hangup control action.",
+    "turns": [
+      {
+        "user": "Goodbye.",
+        "expect": {
+          "action": "hangup",
+          "tools": ["end_call"]
+        }
+      }
+    ]
+  }
+]

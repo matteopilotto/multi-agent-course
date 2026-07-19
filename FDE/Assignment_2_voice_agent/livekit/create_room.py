@@ -18,6 +18,8 @@ from pathlib import Path
 import jwt
 from livekit import api
 
+from env_loader import load_env_files
+
 LOCAL_DEFAULTS = {
     "LIVEKIT_URL": "http://localhost:7880",
     "LIVEKIT_API_KEY": "devkey",
@@ -28,15 +30,7 @@ LOCAL_DEFAULTS = {
 
 def _load_env_files() -> None:
     root = Path(__file__).resolve().parents[1]
-    for path in (root / "pipeline" / ".env", root / "livekit" / ".env"):
-        if not path.exists():
-            continue
-        for raw in path.read_text().splitlines():
-            line = raw.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key, value = line.split("=", 1)
-            os.environ.setdefault(key.strip(), value.strip().strip("\"'"))
+    load_env_files((root / "pipeline" / ".env", root / "livekit" / ".env"))
 
 
 def _setting(name: str) -> str:

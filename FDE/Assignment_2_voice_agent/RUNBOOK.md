@@ -1,387 +1,363 @@
-# Runbook  -  Follow Along End to End
+# Aurora Voice Agent Runbook
 
-Everything you need to run this project from scratch, with the **real output of each command**
-so you know exactly what "working" looks like. All the steps in **Part 1 run fully offline**.
-No API key, network access, or `pip install` is required. Parts 2-3 add live speech.
+This runbook supports a preflighted 45-minute progressive demo and hands-on session after the separate Voice AI presentation. Every stage extends the same Aurora Hotel workflow.
 
-> New here? Read [`README.md`](README.md) for setup, FDE framing, and the 90-minute plan.
-> This file is just "type these commands, see this output."
+The 45-minute clock does not include dependency installation, API-key setup, or microphone permission troubleshooting.
 
-The whole thing is one loop:
+## Preflight
 
-```
-  you speak → STT → LLM agent (+tools) → TTS → you hear a reply
-```
+Complete installation before the workshop.
 
-There are **three provider modes**, all behind the same code:
-
-| Mode | Needs | For |
-|------|-------|-----|
-| `mock` | nothing (offline) | rehearsal, tests, the SIP call demo, live fallback |
-| `openai` | your key | the real "talk to a bot" demo |
-| `groq` | optional key | alternate low-cost provider |
-
----
-
-## Prerequisites
-
-- **Python 3.10+** (`python3 --version`).
-- For **Part 1 (offline)**: nothing else.
-- For **Part 3 (live)**: an OpenAI or Groq key, plus `pip install` and a mic.
-
----
-
-## Directory map
-
-```
-Assignment_2_voice_agent/
-├── README.md            ← the plan / concept
-├── RUNBOOK.md           ← this file
-├── livekit/             ← optional room/session demo
-│   ├── create_room.py
-│   ├── create_token.py
-│   ├── talk_server.py
-│   ├── start_local_server.sh
-│   └── requirements.txt
-├── pipeline/            ← the agent + voice loop
-│   ├── providers.py     ← adaptor: groq / openai / mock
-│   ├── agent.py         ← LLM + tools (availability, booking, transfer, end call)
-│   ├── voice_loop.py    ← VAD→STT→LLM→TTS loop (--text mode too)
-│   ├── smoke_test.py    ← offline end-to-end assertion
-│   ├── requirements.txt
-│   └── config.example.env
-└── mocks/               ← telephony, no carrier
-    ├── demo_call.py     ← full simulated inbound call (SIP→agent→SIP)
-    ├── ivr_menu_mock.py ← interactive IVR menu
-    └── sip-ivr-call-flow.md  ← annotated SIP/RTP reference
-```
-
----
-
-## Part 1  -  Run everything offline (no key, no install)
-
-Start here. This proves the whole system works before you touch a provider.
+Pipeline:
 
 ```bash
-cd voice-agent-workshop
-```
-
-### 1a. Sanity check  -  the automated end-to-end test
-
-```bash
-cd pipeline
-python3 smoke_test.py
-```
-
-Expected output:
-
-```
-you>   Can you tell me the weather?
-agent> I can only help with hotel reservations. Are you looking to book, change, or cancel a stay?
-
-you>   I need a room from August 12 to August 14 for two guests.
-agent> Available rooms for August 12 to August 14: Standard Queen at $189/night. Would you like me to book one of these?
-
-you>   Yes, book it for Priya Shah at priya@example.com.
-agent> Booking confirmed. Confirmation AH-4827 for Priya Shah in a Standard Queen from August 12 to August 14 for 2 guest(s). Confirmation sent to priya@example.com.
-
-you>   Actually, connect me to a person
-agent> Transferring you to the front desk.
-[action: transfer]
-
-you>   Goodbye
-agent> Ending the call.
-[action: hangup]
-
-RESULT: PASS
-```
-
-`PASS` means the loop, the tool calls, and the transfer/hangup control signals are all wired
-correctly. This runs the **real** `Agent`  -  only the provider is mocked.
-
-### 1b. Talk to the agent yourself (typed, offline)
-
-```bash
-PROVIDER=mock python3 voice_loop.py --text
-```
-
-Then type `I need a room from August 12 to August 14 for two guests.` and
-`can I talk to a person?`. Expected:
-
-```
-Provider: mock | LLM: mock-llm
-Call started. Say/type 'goodbye' or Ctrl-C to hang up.
-
-agent> Thanks for calling Aurora Hotel reservations. How can I help?
-you> agent> Available rooms for August 12 to August 14: Standard Queen at $189/night. Would you like me to book one of these?
-  ── turn latency ──
-    stt               0 ms
-    llm+tools         0 ms
-    tts               0 ms
-    TOTAL             0 ms  (target < ~800 ms)
-
-you> agent> Transferring you to the front desk.
-  ── turn latency ──
-    stt               0 ms
-    llm+tools         0 ms
-    tts               0 ms
-    TOTAL             0 ms  (target < ~800 ms)
-
-[transferring to front desk  -  SIP REFER to front-desk]
-```
-
-(Latencies are ~0 ms because the mock is instant  -  on Groq you'll see real milliseconds here.)
-
-### 1c. Watch a full phone call  -  SIP handshake to teardown
-
-```bash
-cd ../mocks
-python3 demo_call.py
-```
-
-Expected output:
-
-```
-=== INBOUND CALL  from +15551230000  Call-ID 9c8b7a6d… ===
-
-  SIP ◀── INVITE sip:agent@voice.demo  (from +15551230000, SDP offer: PCMU/Opus)
-  SIP ──▶ 100 Trying
-  SIP ──▶ 180 Ringing
-  SIP ──▶ 200 OK  (SDP answer: PCMU, RTP port 40000)
-  SIP ◀── ACK  → call established, media flowing
-
-  RTP ═══▶ [agent] Thanks for calling Aurora Hotel reservations. How can I help?
-  RTP ◀═══ [caller] Hi, I need a room from August 12 to August 14 for two guests.
-        │ VAD: endpoint detected → STT → agent
-  RTP ═══▶ [agent] Available rooms for August 12 to August 14: Standard Queen at $189/night. Would you like me to book one of these?
-  RTP ◀═══ [caller] Yes, book it for Priya Shah at priya@example.com.
-        │ VAD: endpoint detected → STT → agent
-  RTP ═══▶ [agent] Booking confirmed. Confirmation AH-4827 for Priya Shah in a Standard Queen from August 12 to August 14 for 2 guest(s). Confirmation sent to priya@example.com.
-  RTP ◀═══ [caller] Great, thanks. That's all, goodbye.
-        │ VAD: endpoint detected → STT → agent
-  RTP ═══▶ [agent] Ending the call.
-        │ tool action: hangup
-
-  SIP ◀── BYE  (caller hung up)
-  SIP ──▶ 200 OK  → media stops
-
-  [call ended] transcript saved · duration logged · 2 caller turns
-```
-
-Now the transfer-to-human variant:
-
-```bash
-python3 demo_call.py --transfer
-```
-
-Expected output (ends in a SIP REFER instead of BYE):
-
-```
-=== INBOUND CALL  from +15551230000  Call-ID 9c8b7a6d… ===
-
-  SIP ◀── INVITE sip:agent@voice.demo  (from +15551230000, SDP offer: PCMU/Opus)
-  SIP ──▶ 100 Trying
-  SIP ──▶ 180 Ringing
-  SIP ──▶ 200 OK  (SDP answer: PCMU, RTP port 40000)
-  SIP ◀── ACK  → call established, media flowing
-
-  RTP ═══▶ [agent] Thanks for calling Aurora Hotel reservations. How can I help?
-  RTP ◀═══ [caller] I need to change a reservation, but I do not have the confirmation number.
-        │ VAD: endpoint detected → STT → agent
-  RTP ═══▶ [agent] I can help with hotel reservations, or connect you to the front desk. What would you prefer?
-  RTP ◀═══ [caller] This is confusing, can I just talk to a person?
-        │ VAD: endpoint detected → STT → agent
-  RTP ═══▶ [agent] Transferring you to the front desk.
-        │ tool action: transfer
-
-  SIP ──▶ REFER  Refer-To: sip:front-desk@voice.demo  → warm transfer
-  SIP ◀── 202 Accepted  → caller re-INVITEd to human queue
-
-  [call ended] transcript saved · duration logged · 2 caller turns
-```
-
-### 1d. The interactive IVR menu
-
-```bash
-python3 ivr_menu_mock.py
-```
-
-Type a digit (`1`/`2`/`3`/`0`) or a phrase (`book`, `hours`, `human`), or `q` to quit.
-Example session (input: `1`, `hours`, `0`):
-
-```
-Thanks for calling Aurora Hotel. Tell me what you need, or press a key:
-  1 or 'book'     → new reservation
-  2 or 'change'   → change or cancel reservation
-  3 or 'hours'    → front desk hours
-  0 or 'human'    → talk to the front desk
-
-caller>   → branch: booking
-  agent says: Sure  -  what dates and how many guests?
-  TOOL FIRES: check_availability(check_in, check_out, guests)
-
-caller>   → branch: hours
-  agent says: We're open 9am to 6pm, Monday through Friday. Anything else?
-  (answered inline  -  no tool call)
-
-caller>   → branch: human
-  agent says: No problem  -  connecting you to a representative now.
-  TOOL FIRES: transfer_to_human()  → SIP REFER to front-desk
-```
-
-> Note: routing is first-match-by-keyword, so an ambiguous phrase like "change my room"
-> resolves to **booking** if "room" appears first in the branch checks. Fine for the demo.
-
-**If all of Part 1 printed the output above, the system is verified.** Everything past here
-just swaps the mock for real speech.
-
----
-
-## Part 2  -  Install for live speech
-
-```bash
-cd ../pipeline
-python3 -m venv .venv && source .venv/bin/activate
+cd FDE/Assignment_2_voice_agent/pipeline
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
-```
-
-If `sounddevice` fails to import later, install PortAudio: `brew install portaudio`.
-
-Create your `.env`:
-
-```bash
 cp config.example.env .env
 ```
 
-Edit `.env` for OpenAI:
-
-```
-PROVIDER=openai
-OPENAI_API_KEY=<your key>
-TTS_BACKEND=system
-```
-
-Use `TTS_BACKEND=system` while rehearsing to keep the demo cheaper and avoid provider
-TTS latency. Switch to provider TTS only when you want a polished voice.
-
----
-
-## Part 3  -  Run live
-
-Typed input against the live LLM + tools (no mic needed  -  good first live check):
-
-```bash
-python3 voice_loop.py --text
-```
-
-Full voice (mic → speech → agent → spoken reply):
-
-```bash
-python3 voice_loop.py
-```
-
-Speak, pause, and the agent replies. The per-turn latency table now shows **real** stt /
-llm+tools / tts milliseconds  -  point out that the LLM stage dominates the ~800 ms budget.
-
-Switch to Groq any time by editing `.env`:
-
-```
-PROVIDER=groq
-GROQ_API_KEY=<your key>
-```
-
-Nothing else changes  -  same commands, same loop.
-
----
-
-## Part 4  -  Optional LiveKit room/session demo
-
-This step is optional. It shows the real room/session abstraction that sits between a local
-voice agent and a production telephony setup. It runs locally and does not require LiveKit
-Cloud. It does not configure SIP by itself.
+LiveKit:
 
 ```bash
 cd ../livekit
-python -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 npm install
 ```
 
-Start Docker Desktop, then start a local LiveKit server in a separate terminal:
+For a live OpenAI path, set the following in `pipeline/.env`:
+
+```env
+PROVIDER=openai
+OPENAI_API_KEY=your_key_here
+TTS_BACKEND=system
+TELEMETRY_JSONL=../logs/voice-events.jsonl
+```
+
+Use `TTS_BACKEND=system` for the no-cost browser voice. Use
+`TTS_BACKEND=provider` to synthesize the greeting and responses with the
+selected provider's `TTS_MODEL` and `TTS_VOICE`. Restart `talk_server.py` after
+changing this setting.
+
+Use `PROVIDER=mock` in commands when no key is available.
+
+Before the session, confirm the offline checks pass:
 
 ```bash
+cd FDE/Assignment_2_voice_agent/pipeline
+source .venv/bin/activate
+python smoke_test.py
+python -m unittest -v test_features.py
+```
+
+## Stage 0: Explain The Progressive Build
+
+Introduce the system before running commands:
+
+```text
+text
+-> LLM and tools
+-> RAG and AgentRouter
+-> VAD and STT
+-> TTS
+-> LiveKit room
+-> telemetry and evaluation
+-> SIP and production scale
+```
+
+Use one booking story through every stage:
+
+```text
+I need a room from August 12 to August 14 for two guests.
+```
+
+## Stage 1: Deterministic Text Agent
+
+```bash
+cd FDE/Assignment_2_voice_agent/pipeline
+source .venv/bin/activate
+python smoke_test.py
+PROVIDER=mock python voice_loop.py --text
+```
+
+Use this booking story:
+
+```text
+I need a room from August 12 to August 14 for two guests.
+Book it for Priya Shah at priya@example.com.
+```
+
+Expected evidence:
+
+- Availability comes from `check_availability`.
+- Booking comes from `create_booking`.
+- The confirmation ID is generated by the mock tool, not the model.
+- Text mode exercises the same agent state and tools as voice mode.
+
+## Stage 2: Live Provider With The Same Agent
+
+When a live key is configured:
+
+```bash
+python voice_loop.py --text
+```
+
+No agent code changes. Only the provider configuration changes.
+
+Compare the mock and live paths on tool selection, response variability, latency, and cost.
+
+## Stage 3: Tools, RAG, Guardrails, And Language Routing
+
+### Tools, RAG, And Guardrails
+
+Continue in the live text session from Stage 2:
+
+```text
+What is the weather?
+What is today's FIFA score?
+What is the cancellation policy?
+```
+
+Verify that weather is redirected to hotel reservations and the cancellation answer uses `search_hotel_knowledge` rather than model memory.
+
+The trace should show `tool.route_selected`, `tool.requested`,
+`retrieval.completed`, and `hotel_policies.md#Cancellation`. The application
+forces retrieval for high-confidence hotel-policy intents so a previous
+off-topic refusal cannot prevent grounding.
+
+### Language Routing
+
+Exit text mode, then run the automated routing proof:
+
+```bash
+cd FDE/Assignment_2_voice_agent/evals
+python run_evals.py --suite core --verbose
+```
+
+Locate `router.language_switch`. This test proves that the same session switches to Spanish, preserves the route on the following turn, and still selects the expected business tool.
+
+Language changes use the structured `set_language` control tool. The model
+proposes the caller's intent. Before changing state, `explicit_language_request()`
+requires the current utterance to explicitly name the requested target language.
+`AgentRouter` then validates `en` or `es`, stores the session state, and supplies
+the matching locale to TTS. Accepted changes show `tool.requested | set_language`
+and `router.language_changed`. Rejected implicit changes show
+`router.language_change_rejected` and leave the current language unchanged.
+
+Then run the live provider in text mode:
+
+```bash
+cd ../pipeline
+python voice_loop.py --text
+```
+
+Use these turns in the same session:
+
+```text
+Please speak Spanish.
+Necesito una habitación para dos personas.
+¿Cuál es la política de mascotas?
+Switch back to English.
+¡Gracias!
+What time is check-in?
+```
+
+Expected evidence:
+
+- The pet policy uses `search_hotel_knowledge` after the language switch.
+- The pet-policy source is `hotel_policies.md#Pets`.
+- `AgentRouter` preserves language state across turns.
+- The Spanish route persists until the caller explicitly switches back to English.
+- `¡Gracias!` does not switch the session back to Spanish because it does not request a language change.
+- The final check-in answer is returned in English.
+
+Testing status:
+
+- Automated multi-turn language routing is verified by the core evaluation suite.
+- Local API routing and Spanish RAG are verified.
+- Live browser speech switching remains a manual acoustic check because it depends on the microphone, speakers, and installed browser voices.
+
+## Stage 4: Local Voice Cascade
+
+Use a live provider for real STT:
+
+```bash
+python voice_loop.py
+```
+
+Speak the same booking request used in text mode. Watch the terminal telemetry for capture, STT, routing, LLM, tools, TTS, and total time.
+
+Change endpoint behavior between runs:
+
+```bash
+ENDPOINT_SILENCE_MS=350 python voice_loop.py
+ENDPOINT_SILENCE_MS=900 python voice_loop.py
+```
+
+Use a sentence with a natural mid-sentence pause. The short threshold demonstrates cutoff risk. The long threshold demonstrates dead air.
+
+## Stage 5: Local LiveKit Room
+
+Use three terminals.
+
+Terminal 1:
+
+```bash
+cd FDE/Assignment_2_voice_agent/livekit
 ./start_local_server.sh
 ```
 
-The local development defaults are:
-
-```text
-LIVEKIT_URL=http://localhost:7880
-LIVEKIT_API_KEY=devkey
-LIVEKIT_API_SECRET=secret
-LIVEKIT_ROOM=aurora-demo-room
-```
-
-Create a room:
+Terminal 2:
 
 ```bash
+cd FDE/Assignment_2_voice_agent/livekit
+source .venv/bin/activate
 python create_room.py
-```
-
-Create caller and agent participant tokens:
-
-```bash
-python create_token.py --identity caller-demo --name "Caller Demo"
-python create_token.py --identity aurora-agent --name "Aurora Agent"
-```
-
-Mimic a caller and agent talking, then show the hotel agent transcript:
-
-```bash
 python talk_server.py
 ```
 
-Open `http://localhost:5173` and click `Start call`. Allow microphone access,
-listen to the greeting, then speak naturally. The browser detects your pause,
-sends the turn to the provider-backed hotel agent, speaks the reply, and shows
-the transcript. Optionally click `Show agent in room` to display the agent
-participant in room state.
+Browser:
 
-Conceptually:
-
-```
-LiveKit room = call/session
-caller-demo = caller participant
-aurora-agent = agent participant
-audio track = voice media
-conversation panel = provider-backed hotel agent transcript
+```text
+http://localhost:5173
 ```
 
-For real SIP, add a LiveKit SIP trunk, dispatch rule, and an agent worker that joins the room.
+Click **Start call** once to grant browser microphone access. The application automatically joins Caller Demo and Aurora Agent.
 
----
+Verify:
+
+- Both participants appear in room state.
+- Caller audio is published.
+- Speaking activates the caller waveform.
+- A pause commits the turn.
+- The transcript shows caller and agent turns.
+- Policy questions show grounding sources.
+- The pipeline and timing panels update.
+- The provider line shows `TTS: <voice>` when provider TTS is enabled, or `Browser TTS` otherwise.
+
+Run this live language sequence:
+
+```text
+Please speak Spanish.
+¿Cuál es la política de cancelación?
+Switch back to English.
+¡Gracias!
+What time is check-in?
+```
+
+Verify that the language badge, response text, selected provider or browser voice, and subsequent turns change together. The Spanish policy turn should show `hotel_policies.md#Cancellation` as its grounding source. After switching to English, `¡Gracias!` must not change the language badge or session route.
+
+## Stage 6: Turn-Taking And Barge-In
+
+Use the browser controls while the call remains connected.
+
+1. Set Endpoint silence to 350 ms and speak with a mid-sentence pause.
+2. Set Endpoint silence to 900 ms and repeat the same sentence.
+3. Restore 650 ms.
+4. Ask for the cancellation policy.
+5. Wait about half a second into Aurora's response.
+6. Interrupt with: `Wait, speak Spanish.`
+7. Ask a second question in Spanish.
+
+Expected evidence:
+
+- Adaptive calibration reports the noise floor and active speech threshold.
+- Lower endpoint silence responds faster but can cut off a caller.
+- Higher endpoint silence preserves pauses but adds delay.
+- Sustained caller speech cancels playback and records a barge-in event.
+- The browser trace shows `barge_in.candidate` followed by `barge_in.detected` for a confirmed interruption.
+- The server trace shows `barge_in.turn_started` on the caller turn created by that interruption.
+- The next caller turn remains in the same session.
+- The Barge-in metric updates once without creating a feedback loop.
+- The next response follows the Spanish route.
+
+The workshop browser demonstrates playback barge-in. A production streaming system must also cancel active model and TTS work across distributed services.
+
+## Stage 7: Telemetry
+
+Inspect the browser runtime trace and the local JSONL file:
+
+```bash
+cd FDE/Assignment_2_voice_agent
+tail -n 1 logs/voice-events.jsonl | python3 -m json.tool
+```
+
+Locate:
+
+- `sessionId`, `turnId`, and `traceId`
+- Provider, model, language, and locale
+- STT, routing, retrieval, LLM, and tool timings
+- Tool arguments and results
+- Grounding sources
+- Transfer or hangup action
+
+The browser also measures end-of-turn to first audio and barge-in detection latency because those events occur at the media client.
+
+Conversation text is omitted and sensitive tool fields are redacted by default. Keep `TELEMETRY_INCLUDE_CONTENT=false` for the workshop.
+
+## Stage 8: Evaluation And Red Teaming
+
+```bash
+cd FDE/Assignment_2_voice_agent/evals
+python3 run_evals.py --suite red-team --verbose
+```
+
+The core suite was already used during language routing. The red-team suite checks prompt injection, policy fabrication, privacy, structured tool input, and multilingual guardrails. Add a new JSON case before changing the prompt or tools so a behavior change has an explicit acceptance criterion.
+
+## Stage 9: Scale Check
+
+```bash
+cd FDE/Assignment_2_voice_agent/pipeline
+python3 scale_check.py --dau 1000000
+```
+
+The default example produces approximately 5,556 peak concurrent calls from explicit assumptions. Change calls per DAU, duration, peak factor, sessions per worker, headroom, and cost per minute before using the result for planning.
+
+```bash
+python3 scale_check.py \
+  --dau 1000000 \
+  --calls-per-dau 0.10 \
+  --duration-minutes 3 \
+  --peak-factor 6 \
+  --cost-per-minute 0.035
+```
+
+## Stage 10: SIP Mapping
+
+```bash
+cd FDE/Assignment_2_voice_agent/mocks
+python3 demo_call.py
+python3 demo_call.py --transfer
+```
+
+Map the local concepts:
+
+```text
+browser caller -> WebRTC participant
+phone caller -> SIP participant
+room -> call session
+audio track -> RTP or SRTP media
+transfer action -> SIP REFER or application routing
+hangup action -> SIP BYE
+public voice edge -> SBC or managed SIP service
+```
+
 
 ## Troubleshooting
 
-| Symptom | Fix |
-|---------|-----|
-| `RuntimeError: Set GROQ_API_KEY...` | Set `PROVIDER=openai` with `OPENAI_API_KEY`, add a Groq key, or run with `PROVIDER=mock` |
-| `RuntimeError: Set OPENAI_API_KEY...` | Add `OPENAI_API_KEY` to `.env`, or run with `PROVIDER=mock` |
-| `ModuleNotFoundError: openai` | You're live without installing  -  `pip install -r requirements.txt`, or use `PROVIDER=mock` (needs nothing) |
-| `sounddevice`/PortAudio error | `brew install portaudio`, or use `--text` mode |
-| Provider TTS error / no audio | Set `TTS_BACKEND=system` |
-| Mic doesn't capture | Grant terminal microphone permission, or use `--text` |
-| Everything feels slow | Try `LLM_MODEL=llama-3.1-8b-instant` in `.env` (faster, weaker tool use) |
-| Live services down mid-demo | `PROVIDER=mock`  -  the whole thing runs offline instantly |
-
----
-
-## What's been verified vs. what needs your machine
-
-- **Verified offline** (Part 1): `smoke_test.py`, `voice_loop.py --text` (mock), `demo_call.py`
-  (both scenarios), `ivr_menu_mock.py`. Outputs above are the actual captured runs.
-- **Needs your laptop** (Parts 2-3): the `pip install`, a real OpenAI/Groq key, and mic-mode
-  `voice_loop.py`. Do one live run before the session using the setup steps in `README.md`.
-- **Optional LiveKit** (Part 4): Docker or a local LiveKit server binary if you want to create
-  a local room and participant tokens.
+| Symptom | Resolution |
+|---------|------------|
+| Missing provider key | Run with `PROVIDER=mock` or correct `pipeline/.env` |
+| `sounddevice` fails | Install PortAudio or use text mode |
+| UI loads but call cannot connect | Keep `start_local_server.sh` running on port 7880 |
+| Browser has no microphone | Grant permission and verify the Caller Demo mute state |
+| Mock browser ignores spoken words | Mock STT intentionally returns scripted phrases; use a live provider for real transcription |
+| Background noise starts turns | Increase Speech sensitivity |
+| Turn cuts off early | Increase Endpoint silence |
+| Turn feels slow | Decrease Endpoint silence carefully |
+| Provider TTS fails | Use `TTS_BACKEND=system` and restart `talk_server.py` |
+| LiveKit uses the system voice | Set `TTS_BACKEND=provider`, restart `talk_server.py`, and confirm the UI shows the provider voice |
+| Live service fails during class | Return to mock text mode and continue the architecture path |

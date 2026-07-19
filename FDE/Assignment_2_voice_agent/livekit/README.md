@@ -1,39 +1,51 @@
-# Optional LiveKit Room Demo
+# Local LiveKit Voice Session
 
-This folder adds a lightweight LiveKit step to the assignment. It is optional. The core hotel voice agent runs without LiveKit.
-
-The goal is to show how a real-time media platform represents a call-like session:
-
-```text
-room = session
-participant = caller or agent
-track = audio stream
-```
-
-This is not a full SIP setup. SIP requires additional telephony configuration such as a LiveKit SIP trunk and dispatch rule.
+This folder provides the room and browser stage of the Aurora workshop. It runs against a self-contained LiveKit development server and does not require LiveKit Cloud credentials.
 
 ## Install
 
 ```bash
 cd FDE/Assignment_2_voice_agent/livekit
-python -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 npm install
 ```
 
-## Start A Local LiveKit Server
+## Run
 
-This demo is local-first. You do not need LiveKit Cloud credentials.
-Make sure Docker Desktop is running first.
-
-In a separate terminal, run:
+Terminal 1:
 
 ```bash
 ./start_local_server.sh
 ```
 
-The local dev server uses:
+Terminal 2:
+
+```bash
+source .venv/bin/activate
+python create_room.py
+python talk_server.py
+```
+
+Open `http://localhost:5173`, click **Start call**, and allow microphone access. Caller Demo and Aurora Agent join `aurora-demo-room` automatically.
+
+The browser shows:
+
+- LiveKit participants and published audio state
+- Caller and agent activity
+- Automatic turn detection
+- Playback barge-in with candidate pre-roll so the first interrupted word is retained
+- English and Spanish routing
+- RAG sources
+- STT, LLM, tool, server, first-audio, and interruption timing
+- Adjustable endpoint silence and speech sensitivity
+
+Language state changes only after an explicit request that names the target
+language, such as `Please speak Spanish` or `Switch back to English`. Multilingual
+speech by itself does not change the configured response language.
+
+## Local Defaults
 
 ```env
 LIVEKIT_URL=http://localhost:7880
@@ -42,82 +54,44 @@ LIVEKIT_API_SECRET=secret
 LIVEKIT_ROOM=aurora-demo-room
 ```
 
-The scripts use these local defaults automatically.
+Override these values in `livekit/.env` when using another server. The scripts also read `pipeline/.env` for the selected agent provider.
 
-## Optional: Override Configuration
+## Provider Behavior
 
-The local defaults are enough for the workshop. If you already have another LiveKit
-server, you can override `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`,
-and `LIVEKIT_ROOM` in a local `livekit/.env` file. The scripts also check
-`pipeline/.env`. Do not commit real credentials.
+`PROVIDER=openai` or `PROVIDER=groq` transcribes the recorded browser turn and runs the live hotel agent. `PROVIDER=mock` uses scripted transcripts, deterministic tools, and no paid calls.
 
-## Create A Room
+`TTS_BACKEND=provider` generates WAV audio through the selected provider using `TTS_MODEL` and `TTS_VOICE`. `TTS_BACKEND=system` uses browser speech synthesis in the LiveKit UI and avoids provider TTS cost. The browser falls back to its installed voice if provider synthesis or playback fails.
 
-```bash
-python create_room.py
+The talk server stores independent agent state per browser session and writes structured telemetry to `../logs/voice-events.jsonl`.
+
+## Architecture Boundary
+
+The two identities are real room participants, but the AI processing path is a workshop bridge:
+
+```text
+browser microphone -> local endpointing -> HTTP /voice-agent -> STT and agent -> provider WAV or browser TTS
 ```
 
-## Create Join Tokens
+A room-native production worker would subscribe directly to the caller audio track, stream audio through STT or a realtime model, publish an agent audio track, and coordinate distributed cancellation.
 
-Caller token:
+## SIP Extension
 
-```bash
-python create_token.py --identity caller-demo --name "Caller Demo"
+```text
+phone caller -> carrier -> SIP trunk -> SIP edge or SBC -> LiveKit room -> agent worker
 ```
 
-Agent token:
+A real SIP deployment requires a trunk, dispatch rule, internet-reachable signaling and media endpoints, authentication, codec negotiation, and transfer handling. A SIP REFER maps to Aurora's transfer action, while SIP BYE maps to the end-call action.
 
-```bash
-python create_token.py --identity aurora-agent --name "Aurora Agent"
-```
+## Troubleshooting
 
-The caller token represents a user or phone caller. The agent token represents the voice agent joining the same room.
-
-## Mimic A Conversation In The Browser
-
-Token creation does not join anyone to the room. A participant joins only when a
-client uses a token to connect and publish audio.
-
-Start the local talk client:
-
-```bash
-python talk_server.py
-```
-
-Open `http://localhost:5173`:
-
-- Click `Start call` in the Caller Demo pane.
-- Allow microphone access when the browser asks.
-- Speak naturally after the greeting. The browser detects your pause and sends the turn.
-- Optionally click `Show agent in room` to display the agent participant in room state.
-
-The caller pane is a real LiveKit participant in `aurora-demo-room`; the optional
-agent pane shows how another participant appears in room state. The conversation
-panel calls the existing hotel agent through `PROVIDER=mock`, `PROVIDER=openai`,
-or `PROVIDER=groq` from `pipeline/.env` and shows the caller/agent transcript
-directly in the browser. The typed field is only a fallback for noisy rooms or
-microphone issues.
-
-To make Aurora answer as the actual hotel agent, the next production step is an
-agent worker that joins as `aurora-agent`, subscribes to caller audio, runs STT,
-calls the hotel agent tools, and publishes TTS audio back into the LiveKit room.
-
-## How This Maps To SIP
-
-| SIP Demo | LiveKit Room Demo |
-|----------|-------------------|
-| SIP INVITE creates a call | Room is created or joined |
-| Caller sends RTP audio | Caller participant publishes an audio track |
-| Agent replies with RTP audio | Agent participant publishes an audio track |
-| REFER transfers the call | App or SIP layer routes participant to another destination |
-| BYE ends the call | Participant leaves or room closes |
-
-## Production Extension
-
-To turn this into a real SIP demo, add:
-
-- LiveKit SIP trunk
-- Dispatch rule that sends inbound calls to a room
-- Agent worker that joins the room
-- Audio bridge between LiveKit tracks and the hotel agent pipeline
-- Transfer handling for front-desk escalation
+| Symptom | Check |
+|---------|-------|
+| Could not establish PC connection | Confirm `./start_local_server.sh` is still running on port 7880 |
+| UI loads but Start call fails | Confirm both the LiveKit server and `talk_server.py` are running |
+| No microphone activity | Allow browser microphone access and check the Caller Demo mute state |
+| Background noise starts turns | Increase Speech sensitivity |
+| Aurora interrupts itself | Reload the latest UI, use headphones if available, and increase Speech sensitivity |
+| Turns commit too quickly | Increase Endpoint silence |
+| Turns feel slow | Decrease Endpoint silence carefully |
+| No real transcription in mock mode | Set a live provider in `pipeline/.env` |
+| Voice still sounds like the system voice | Set `TTS_BACKEND=provider`, restart `talk_server.py`, and confirm the UI shows `TTS: <voice>` |

@@ -44,6 +44,16 @@
     { label: "German", code: "de" },
   ];
 
+  // Resolve the backend URL LATE — at call time, not once at load. When the
+  // widget is injected as a content script, window.FDE_CONFIG can be populated
+  // asynchronously (e.g. after the extension reads chrome.storage), which races
+  // this module's synchronous load. Snapshotting API_URL above would lose that
+  // race and get stuck on the default; reading it per use means the current
+  // value always wins, no matter how the widget was loaded.
+  function apiUrl() {
+    return (window.FDE_CONFIG && window.FDE_CONFIG.API_URL) || CONFIG.API_URL;
+  }
+
   // ---- state --------------------------------------------------------------
   let panelOpen = false;
   let busy = false;
@@ -207,7 +217,7 @@
       <div class="fde-badges" id="fde-badges"></div>
       <button class="fde-btn primary" id="fde-page" type="button">Translate page</button>
       <button class="fde-btn ghost" id="fde-restore" type="button">Restore page</button>
-      <div class="fde-status" id="fde-status">Backend: ${CONFIG.API_URL}</div>
+      <div class="fde-status" id="fde-status"></div>
     </div>`;
 
   document.body.appendChild(fab);
@@ -217,6 +227,10 @@
   const statusEl = panel.querySelector("#fde-status");
   const pageBtn = panel.querySelector("#fde-page");
   const langSelect = panel.querySelector("#fde-lang");
+
+  // Idle hint shows the resolved backend; refreshed each time the panel opens
+  // so a late-arriving FDE_CONFIG is reflected (see apiUrl()).
+  setStatus(backendHint());
 
   // ---- events -------------------------------------------------------------
   fab.addEventListener("click", togglePanel);
@@ -239,6 +253,7 @@
   function setPanel(open) {
     panelOpen = open;
     panel.classList.toggle("open", open);
+    if (open) refreshBackendHint();
   }
 
   async function translatePage() {
@@ -338,7 +353,7 @@
 
   // ---- backend I/O --------------------------------------------------------
   async function postJSON(path, body) {
-    const res = await fetch(CONFIG.API_URL + path, {
+    const res = await fetch(apiUrl() + path, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -383,6 +398,13 @@
     statusEl.textContent = text;
     statusEl.classList.toggle("err", !!isErr);
   }
+  function backendHint() {
+    return "Backend: " + apiUrl();
+  }
+  function refreshBackendHint() {
+    // refresh only the idle hint — never clobber progress, results, or errors
+    if (statusEl.textContent.startsWith("Backend:")) setStatus(backendHint());
+  }
   function handleError(err) {
     if (err instanceof NotImplemented) {
       setStatus(`${err.path} isn't implemented yet — build it in your backend!`, true);
@@ -391,7 +413,7 @@
     } else if (err.message && err.message.startsWith("HTTP")) {
       setStatus(`Backend error (${err.message}). Check your gateway/AI-service logs.`, true);
     } else {
-      setStatus(`Can't reach backend at ${CONFIG.API_URL}. Is your Node gateway running?`, true);
+      setStatus(`Can't reach backend at ${apiUrl()}. Is your Node gateway running?`, true);
     }
     console.error("[FDE]", err);
   }
@@ -414,5 +436,5 @@
   RateLimited.prototype = Object.create(Error.prototype);
 
   console.log("%c[FDE] Live Translate widget loaded.", "color:#10b981;font-weight:bold");
-  console.log("[FDE] Backend:", CONFIG.API_URL, "· open the button bottom-right.");
+  console.log("[FDE] Backend:", apiUrl(), "· open the button bottom-right.");
 })();
