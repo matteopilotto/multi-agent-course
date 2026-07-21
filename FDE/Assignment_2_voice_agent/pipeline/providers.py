@@ -333,7 +333,7 @@ def _repair_tool_use_failed(exc: Exception, tools: list[dict]):
     schema-mismatch on a tool call.
     """
     body = getattr(exc, "body", None)
-    error = body.get("error") if isinstance(body, dict) else None
+    error = body if isinstance(body, dict) else None
     if not isinstance(error, dict) or error.get("code") != "tool_use_failed":
         return None
     match = _FAILED_GENERATION_RE.search(error.get("failed_generation") or "")
