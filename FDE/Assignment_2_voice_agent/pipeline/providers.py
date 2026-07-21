@@ -97,14 +97,29 @@ class Provider:
         tools: list[dict] | None = None,
         tool_choice=None,
     ):
-        """One chat-completion call. Returns the raw SDK response."""
-        return self.client.chat.completions.create(
-            model=self.llm_model,
-            messages=messages,
-            tools=tools or None,
-            tool_choice=(tool_choice or "auto") if tools else None,
-            temperature=0.3,
-        )
+        """One chat-completion call. Returns the raw SDK response.
+
+        Groq's llama models occasionally emit a tool call with the wrong JSON
+        type for a field (e.g. `"guests": "1"` for an integer parameter).
+        Groq validates its own generation against the tool schema and rejects
+        it with a 400 before we ever see a response, even though the intended
+        call is recoverable from the error body. Repair and replay it instead
+        of crashing the turn.
+        """
+        from openai import BadRequestError
+        try:
+            return self.client.chat.completions.create(
+                model=self.llm_model,
+                messages=messages,
+                tools=tools or None,
+                tool_choice=(tool_choice or "auto") if tools else None,
+                temperature=0.3,
+            )
+        except BadRequestError as exc:
+            repaired = _repair_tool_use_failed(exc, tools or [])
+            if repaired is None:
+                raise
+            return repaired
 
     # --- STT ---
     def transcribe(self, pcm_int16: bytes, sample_rate: int = 16000) -> str:
@@ -305,6 +320,48 @@ def _mk_tool(name: str, args: dict):
     tc = NS(id=f"call_{name}", type="function",
             function=NS(name=name, arguments=json.dumps(args)))
     return NS(choices=[NS(message=NS(content=None, tool_calls=[tc]))])
+
+
+_FAILED_GENERATION_RE = re.compile(r"<function=(\w+)>(\{.*\})</function>", re.DOTALL)
+
+
+def _repair_tool_use_failed(exc: Exception, tools: list[dict]):
+    """Recover a `tool_use_failed` 400 by coercing arguments to the schema's
+    declared types and replaying it as a normal tool-call response.
+
+    Returns None (caller should re-raise) if the error isn't a recoverable
+    schema-mismatch on a tool call.
+    """
+    body = getattr(exc, "body", None)
+    error = body if isinstance(body, dict) else None
+    if not isinstance(error, dict) or error.get("code") != "tool_use_failed":
+        return None
+    match = _FAILED_GENERATION_RE.search(error.get("failed_generation") or "")
+    if not match:
+        return None
+    name, raw_args = match.group(1), match.group(2)
+    try:
+        args = json.loads(raw_args)
+    except json.JSONDecodeError:
+        return None
+    schema = next(
+        (t["function"]["parameters"].get("properties", {})
+         for t in tools if t.get("function", {}).get("name") == name),
+        {},
+    )
+    for key, value in list(args.items()):
+        declared_type = schema.get(key, {}).get("type")
+        if declared_type == "integer" and isinstance(value, str):
+            try:
+                args[key] = int(value)
+            except ValueError:
+                pass
+        elif declared_type == "number" and isinstance(value, str):
+            try:
+                args[key] = float(value)
+            except ValueError:
+                pass
+    return _mk_tool(name, args)
 
 
 def _tool_choice_name(tool_choice) -> str | None:
