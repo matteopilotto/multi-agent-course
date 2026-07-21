@@ -322,7 +322,7 @@ def _mk_tool(name: str, args: dict):
     return NS(choices=[NS(message=NS(content=None, tool_calls=[tc]))])
 
 
-_FAILED_GENERATION_RE = re.compile(r"<function=(\w+)>(\{.*\})</function>", re.DOTALL)
+_FAILED_GENERATION_RE = re.compile(r"<function=(\w+)>?(\{.*\})</function>", re.DOTALL)
 
 
 def _repair_tool_use_failed(exc: Exception, tools: list[dict]):
