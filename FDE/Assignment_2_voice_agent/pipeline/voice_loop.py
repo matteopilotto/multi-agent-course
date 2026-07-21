@@ -123,7 +123,16 @@ def run(text_mode: bool) -> None:
 
             reply, action = agent.respond(user_text, trace=trace)
 
-            with trace.span("tts", model=getattr(provider, "tts_model", "unknown")):
+            tts_backend = getattr(provider, "tts_backend", "unknown")
+            tts_model = getattr(provider, "tts_model", "unknown")
+            if tts_backend == "provider":
+                tts_label = tts_model
+            elif tts_backend == "system":
+                tts_label = f"system:{os.getenv('SYSTEM_TTS_CMD', 'say')}"
+            else:
+                tts_label = tts_backend  # e.g. "print" -- no command executed
+
+            with trace.span("tts", model=tts_label, backend=tts_backend):
                 speak(provider, reply)
 
             payload = trace.finish(action=action, sources=agent.last_sources)
