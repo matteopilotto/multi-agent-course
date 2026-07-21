@@ -20,7 +20,7 @@ import tempfile
 import uuid
 
 from agent import Agent
-from providers import make_provider
+from providers import Provider, make_provider
 from telemetry import TurnTrace, format_trace, write_trace
 
 try:
