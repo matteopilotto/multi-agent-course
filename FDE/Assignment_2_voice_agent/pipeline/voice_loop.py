@@ -32,6 +32,11 @@ except ModuleNotFoundError:
 SAMPLE_RATE = int(os.getenv("SAMPLE_RATE", "16000"))
 VAD_AGGRESSIVENESS = int(os.getenv("VAD_AGGRESSIVENESS", "2"))
 ENDPOINT_SILENCE_MS = int(os.getenv("ENDPOINT_SILENCE_MS", "600"))
+# Trailing silence kept in the utterance sent to STT. We buffer the full
+# ENDPOINT_SILENCE_MS to *decide* the turn ended, but transcribing that
+# silence only adds latency; keep a small guard band so a VAD-clipped final
+# consonant still gets transcribed, and drop the rest.
+STT_GUARD_SILENCE_MS = 100
 
 
 # --- Audio (imported lazily so --text mode needs no audio libs) ---
@@ -75,6 +80,13 @@ def record_utterance(trace: TurnTrace) -> bytes:
                         endpointSilenceMs=ENDPOINT_SILENCE_MS,
                     )
                     break
+
+    # The final `silence_frames_needed` frames are all the trailing silence
+    # that triggered the endpoint. Drop most of it before STT, keeping a
+    # ~STT_GUARD_SILENCE_MS guard band.
+    trim_frames = max(0, silence_frames_needed - STT_GUARD_SILENCE_MS // frame_ms)
+    if trim_frames:
+        frames = frames[:-trim_frames]
     return b"".join(frames)
 
 
