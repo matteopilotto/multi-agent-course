@@ -15,6 +15,7 @@ Exposes three stages the voice loop needs:
 
 from __future__ import annotations
 
+import base64
 import io
 import json
 import os
@@ -48,9 +49,10 @@ PRESETS = {
         # large = reliable tool-calling; mistral-small-latest for lower latency.
         "llm_model": "mistral-large-latest",
         "stt_model": "voxtral-mini-latest",
-        "tts_model": None,               # native Voxtral TTS not wired in v1
-        "tts_voice": None,
-        "tts_backend": "system",         # endpoint shape unverified; force local voice
+        "tts_model": "voxtral-mini-tts-latest",
+        # Preset voice slug from GET /audio/voices (not a named voice like
+        # OpenAI's "alloy"); "en_paul_neutral" is a calm US-English male voice.
+        "tts_voice": "en_paul_neutral",
     },
 }
 
@@ -170,11 +172,17 @@ class Provider:
             "input": text,
             "response_format": "wav",
         }
-        if self.tts_instructions:
+        # Mistral's /audio/speech rejects unknown body fields; it has no
+        # `instructions`-style steering param.
+        if self.tts_instructions and self.name != "mistral":
             speech_args["instructions"] = self.tts_instructions
         resp = self.client.audio.speech.create(
             **speech_args,
         )
+        if self.name == "mistral":
+            # Unlike OpenAI, Mistral wraps the audio as base64 JSON
+            # (`{"audio_data": "..."}`) instead of returning raw bytes.
+            return base64.b64decode(json.loads(resp.content)["audio_data"])
         return resp.content
 
 
