@@ -11,7 +11,7 @@ os.environ.setdefault("TTS_BACKEND", "print")
 
 from agent import Agent, explicit_language_request, required_tool_for
 from knowledge import search_hotel_knowledge
-from providers import MockProvider, _env_or_default, _mk_tool, make_provider
+from providers import MockProvider, Provider, _env_or_default, _mk_tool, make_provider
 from router import AgentRouter
 from scale_check import estimate_capacity
 from telemetry import TurnTrace
@@ -79,6 +79,19 @@ class ProviderConfigurationTests(unittest.TestCase):
     def test_explicit_model_override_is_preserved(self):
         with patch.dict(os.environ, {"LLM_MODEL": "gpt-4.1-mini"}):
             self.assertEqual(_env_or_default("LLM_MODEL", "gpt-4o-mini"), "gpt-4.1-mini")
+
+    def test_mistral_preset_configures_client_and_forces_system_tts(self):
+        env = dict(os.environ)
+        env.pop("TTS_BACKEND", None)
+        env["MISTRAL_API_KEY"] = "test-key"
+        with patch.dict(os.environ, env, clear=True), patch("openai.OpenAI") as mock_openai:
+            provider = Provider("mistral")
+
+        mock_openai.assert_called_once_with(
+            api_key="test-key", base_url="https://api.mistral.ai/v1"
+        )
+        self.assertEqual(provider.llm_model, "mistral-large-latest")
+        self.assertEqual(provider.tts_backend, "system")
 
 
 class RetrievalTests(unittest.TestCase):
