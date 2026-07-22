@@ -118,14 +118,15 @@ class Provider:
         of crashing the turn.
         """
         from openai import BadRequestError
+        chat_args = {"model": self.llm_model, "messages": messages, "temperature": 0.3}
+        if tools:
+            # Passing tool_choice=None explicitly (rather than omitting the
+            # key) serializes to a literal `null`, which Mistral's stricter
+            # schema validation rejects with a 422 for tool-less turns.
+            chat_args["tools"] = tools
+            chat_args["tool_choice"] = tool_choice or "auto"
         try:
-            return self.client.chat.completions.create(
-                model=self.llm_model,
-                messages=messages,
-                tools=tools or None,
-                tool_choice=(tool_choice or "auto") if tools else None,
-                temperature=0.3,
-            )
+            return self.client.chat.completions.create(**chat_args)
         except BadRequestError as exc:
             repaired = _repair_tool_use_failed(exc, tools or [])
             if repaired is None:
@@ -140,8 +141,12 @@ class Provider:
         transcription_args = {
             "model": self.stt_model,
             "file": wav,
-            "response_format": "text",
         }
+        # Mistral's response_format="text" returns the raw JSON body as a
+        # string instead of plain text, so leave it unset there and let the
+        # SDK parse the default JSON response into a Transcription object.
+        if self.name != "mistral":
+            transcription_args["response_format"] = "text"
         if self.stt_prompt:
             transcription_args["prompt"] = self.stt_prompt
         resp = self.client.audio.transcriptions.create(
