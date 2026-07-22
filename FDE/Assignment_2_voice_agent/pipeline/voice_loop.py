@@ -4,7 +4,7 @@ voice_loop.py  -  the turn loop (Layer A).
     mic -> VAD endpointing -> STT -> Agent -> TTS -> speakers
 
 with per-stage latency timing so the room can SEE where the ~800ms turn budget
-goes. Provider (Groq/OpenAI) is chosen in .env; see providers.py.
+goes. Provider (Groq/OpenAI/Mistral) is chosen in .env; see providers.py.
 
 Modes:
     python voice_loop.py          # real mic
