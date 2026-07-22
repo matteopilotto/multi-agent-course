@@ -127,16 +127,18 @@ The commands remain the same.
 ## Mistral Setup
 
 The provider adapter reaches Mistral's native API (`https://api.mistral.ai/v1`), which is
-OpenAI-compatible for chat and tool calling.
+OpenAI-compatible for chat, tool calling, and STT. Its TTS (Voxtral) has the same request
+shape but wraps the audio as base64 JSON instead of returning raw bytes, and uses preset
+voice slugs (e.g. `en_paul_neutral`) instead of named voices like OpenAI's `alloy`; the
+adapter handles both differences transparently.
 
 ```env
 PROVIDER=mistral
 MISTRAL_API_KEY=your_key_here
 ```
 
-`TTS_BACKEND` is always forced to `system` for Mistral: it has a native Voxtral TTS model,
-but its `/audio/speech` endpoint shape isn't verified yet, so cloud TTS isn't wired up for
-this provider. The commands remain the same.
+The commands remain the same. Set `TTS_BACKEND=system` if you'd rather use the local
+voice command than Mistral's cloud TTS.
 
 ## Local LiveKit Demo
 
