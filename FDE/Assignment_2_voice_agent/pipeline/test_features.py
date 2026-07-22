@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import base64
+import json
 import os
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 os.environ["PROVIDER"] = "mock"
@@ -11,7 +14,7 @@ os.environ.setdefault("TTS_BACKEND", "print")
 
 from agent import Agent, explicit_language_request, required_tool_for
 from knowledge import search_hotel_knowledge
-from providers import MockProvider, _env_or_default, _mk_tool, make_provider
+from providers import MockProvider, Provider, _env_or_default, _mk_tool, make_provider
 from router import AgentRouter
 from scale_check import estimate_capacity
 from telemetry import TurnTrace
@@ -79,6 +82,39 @@ class ProviderConfigurationTests(unittest.TestCase):
     def test_explicit_model_override_is_preserved(self):
         with patch.dict(os.environ, {"LLM_MODEL": "gpt-4.1-mini"}):
             self.assertEqual(_env_or_default("LLM_MODEL", "gpt-4o-mini"), "gpt-4.1-mini")
+
+    def test_mistral_preset_configures_client_and_defaults_to_provider_tts(self):
+        env = dict(os.environ)
+        env.pop("TTS_BACKEND", None)
+        env["MISTRAL_API_KEY"] = "test-key"
+        with patch.dict(os.environ, env, clear=True), patch("openai.OpenAI") as mock_openai:
+            provider = Provider("mistral")
+
+        mock_openai.assert_called_once_with(
+            api_key="test-key", base_url="https://api.mistral.ai/v1"
+        )
+        self.assertEqual(provider.llm_model, "mistral-large-latest")
+        self.assertEqual(provider.tts_model, "voxtral-mini-tts-latest")
+        self.assertEqual(provider.tts_voice, "en_paul_neutral")
+        self.assertEqual(provider.tts_backend, "provider")
+
+    def test_mistral_synthesize_decodes_base64_audio_data(self):
+        env = dict(os.environ)
+        env["MISTRAL_API_KEY"] = "test-key"
+        env["TTS_BACKEND"] = "provider"
+        raw_wav = b"RIFF...fake-wav-bytes"
+        encoded = base64.b64encode(raw_wav).decode()
+        with patch.dict(os.environ, env, clear=True), patch("openai.OpenAI") as mock_openai:
+            mock_client = mock_openai.return_value
+            mock_client.audio.speech.create.return_value = SimpleNamespace(
+                content=json.dumps({"audio_data": encoded}).encode()
+            )
+            provider = Provider("mistral")
+            result = provider.synthesize("Hello")
+
+        self.assertEqual(result, raw_wav)
+        _, kwargs = mock_client.audio.speech.create.call_args
+        self.assertNotIn("instructions", kwargs)
 
 
 class RetrievalTests(unittest.TestCase):

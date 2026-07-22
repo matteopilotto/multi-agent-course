@@ -1,9 +1,10 @@
 """
-providers.py  -  one adaptor, two backends: Groq and OpenAI.
+providers.py  -  one adaptor, three backends: Groq, OpenAI, and Mistral.
 
-Groq speaks the OpenAI API dialect, so a single code path covers both  -  only
-base_url, api_key, and model names differ. Switch with PROVIDER=groq|openai in
-.env; move to your OpenAI key later by flipping that one value.
+Groq and Mistral both speak the OpenAI API dialect, so a single code path
+covers all three  -  only base_url, api_key, and model names differ. Switch
+with PROVIDER=groq|openai|mistral in .env; move to a different key later by
+flipping that one value.
 
 Exposes three stages the voice loop needs:
     chat(messages, tools)        -> LLM turn (OpenAI-style tool calling)
@@ -14,6 +15,7 @@ Exposes three stages the voice loop needs:
 
 from __future__ import annotations
 
+import base64
 import io
 import json
 import os
@@ -40,6 +42,17 @@ PRESETS = {
         "stt_model": "whisper-1",
         "tts_model": "tts-1",
         "tts_voice": "alloy",
+    },
+    "mistral": {
+        "base_url": "https://api.mistral.ai/v1",
+        "api_key_env": "MISTRAL_API_KEY",
+        # large = reliable tool-calling; mistral-small-latest for lower latency.
+        "llm_model": "mistral-large-latest",
+        "stt_model": "voxtral-mini-latest",
+        "tts_model": "voxtral-mini-tts-latest",
+        # Preset voice slug from GET /audio/voices (not a named voice like
+        # OpenAI's "alloy"); "en_paul_neutral" is a calm US-English male voice.
+        "tts_voice": "en_paul_neutral",
     },
 }
 
@@ -88,7 +101,7 @@ class Provider:
         self.tts_voice = _env_or_default("TTS_VOICE", p["tts_voice"])
         self.tts_instructions = os.getenv("TTS_INSTRUCTIONS")
         # "provider" = cloud TTS; "system" = local system voice command.
-        self.tts_backend = os.getenv("TTS_BACKEND", "provider").lower()
+        self.tts_backend = os.getenv("TTS_BACKEND", p.get("tts_backend", "provider")).lower()
 
     # --- LLM ---
     def chat(
@@ -107,14 +120,15 @@ class Provider:
         of crashing the turn.
         """
         from openai import BadRequestError
+        chat_args = {"model": self.llm_model, "messages": messages, "temperature": 0.3}
+        if tools:
+            # Passing tool_choice=None explicitly (rather than omitting the
+            # key) serializes to a literal `null`, which Mistral's stricter
+            # schema validation rejects with a 422 for tool-less turns.
+            chat_args["tools"] = tools
+            chat_args["tool_choice"] = tool_choice or "auto"
         try:
-            return self.client.chat.completions.create(
-                model=self.llm_model,
-                messages=messages,
-                tools=tools or None,
-                tool_choice=(tool_choice or "auto") if tools else None,
-                temperature=0.3,
-            )
+            return self.client.chat.completions.create(**chat_args)
         except BadRequestError as exc:
             repaired = _repair_tool_use_failed(exc, tools or [])
             if repaired is None:
@@ -129,8 +143,12 @@ class Provider:
         transcription_args = {
             "model": self.stt_model,
             "file": wav,
-            "response_format": "text",
         }
+        # Mistral's response_format="text" returns the raw JSON body as a
+        # string instead of plain text, so leave it unset there and let the
+        # SDK parse the default JSON response into a Transcription object.
+        if self.name != "mistral":
+            transcription_args["response_format"] = "text"
         if self.stt_prompt:
             transcription_args["prompt"] = self.stt_prompt
         resp = self.client.audio.transcriptions.create(
@@ -144,17 +162,27 @@ class Provider:
         if self.tts_backend == "system":
             subprocess.run([os.getenv("SYSTEM_TTS_CMD", "say"), text], check=False)
             return None
+        if self.tts_model is None:
+            raise RuntimeError(
+                f"Provider {self.name!r} has no cloud TTS wired  -  set TTS_BACKEND=system"
+            )
         speech_args = {
             "model": self.tts_model,
             "voice": self.tts_voice,
             "input": text,
             "response_format": "wav",
         }
-        if self.tts_instructions:
+        # Mistral's /audio/speech rejects unknown body fields; it has no
+        # `instructions`-style steering param.
+        if self.tts_instructions and self.name != "mistral":
             speech_args["instructions"] = self.tts_instructions
         resp = self.client.audio.speech.create(
             **speech_args,
         )
+        if self.name == "mistral":
+            # Unlike OpenAI, Mistral wraps the audio as base64 JSON
+            # (`{"audio_data": "..."}`) instead of returning raw bytes.
+            return base64.b64decode(json.loads(resp.content)["audio_data"])
         return resp.content
 
 

@@ -195,8 +195,11 @@ def _voice_agent_reply(
                 transcription_args = {
                     "model": agent.provider.stt_model,
                     "file": audio_file,
-                    "response_format": "text",
                 }
+                # Mistral's response_format="text" returns the raw JSON body
+                # as a string instead of plain text; see providers.py.
+                if getattr(agent.provider, "name", "") != "mistral":
+                    transcription_args["response_format"] = "text"
                 stt_prompt = getattr(agent.provider, "stt_prompt", "")
                 if stt_prompt:
                     transcription_args["prompt"] = stt_prompt

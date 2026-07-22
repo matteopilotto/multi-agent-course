@@ -14,7 +14,7 @@ caller audio -> VAD and endpointing -> STT -> AgentRouter -> LLM -> RAG and tool
 - Hotel-only conversational guardrails
 - Local policy RAG using SQLite FTS5
 - English and Spanish session routing
-- Mock, OpenAI, and Groq provider modes
+- Mock, OpenAI, Groq, and Mistral provider modes
 - Local microphone capture with WebRTC VAD
 - Browser VAD with adaptive noise calibration and playback barge-in
 - Per-turn structured telemetry and a browser trace timeline
@@ -123,6 +123,22 @@ TTS_BACKEND=system
 ```
 
 The commands remain the same.
+
+## Mistral Setup
+
+The provider adapter reaches Mistral's native API (`https://api.mistral.ai/v1`), which is
+OpenAI-compatible for chat, tool calling, and STT. Its TTS (Voxtral) has the same request
+shape but wraps the audio as base64 JSON instead of returning raw bytes, and uses preset
+voice slugs (e.g. `en_paul_neutral`) instead of named voices like OpenAI's `alloy`; the
+adapter handles both differences transparently.
+
+```env
+PROVIDER=mistral
+MISTRAL_API_KEY=your_key_here
+```
+
+The commands remain the same. Set `TTS_BACKEND=system` if you'd rather use the local
+voice command than Mistral's cloud TTS.
 
 ## Local LiveKit Demo
 
