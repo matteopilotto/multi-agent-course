@@ -1,9 +1,10 @@
 """
-providers.py  -  one adaptor, two backends: Groq and OpenAI.
+providers.py  -  one adaptor, three backends: Groq, OpenAI, and Mistral.
 
-Groq speaks the OpenAI API dialect, so a single code path covers both  -  only
-base_url, api_key, and model names differ. Switch with PROVIDER=groq|openai in
-.env; move to your OpenAI key later by flipping that one value.
+Groq and Mistral both speak the OpenAI API dialect, so a single code path
+covers all three  -  only base_url, api_key, and model names differ. Switch
+with PROVIDER=groq|openai|mistral in .env; move to a different key later by
+flipping that one value.
 
 Exposes three stages the voice loop needs:
     chat(messages, tools)        -> LLM turn (OpenAI-style tool calling)
@@ -40,6 +41,16 @@ PRESETS = {
         "stt_model": "whisper-1",
         "tts_model": "tts-1",
         "tts_voice": "alloy",
+    },
+    "mistral": {
+        "base_url": "https://api.mistral.ai/v1",
+        "api_key_env": "MISTRAL_API_KEY",
+        # large = reliable tool-calling; mistral-small-latest for lower latency.
+        "llm_model": "mistral-large-latest",
+        "stt_model": "voxtral-mini-latest",
+        "tts_model": None,               # native Voxtral TTS not wired in v1
+        "tts_voice": None,
+        "tts_backend": "system",         # endpoint shape unverified; force local voice
     },
 }
 
@@ -88,7 +99,7 @@ class Provider:
         self.tts_voice = _env_or_default("TTS_VOICE", p["tts_voice"])
         self.tts_instructions = os.getenv("TTS_INSTRUCTIONS")
         # "provider" = cloud TTS; "system" = local system voice command.
-        self.tts_backend = os.getenv("TTS_BACKEND", "provider").lower()
+        self.tts_backend = os.getenv("TTS_BACKEND", p.get("tts_backend", "provider")).lower()
 
     # --- LLM ---
     def chat(
@@ -144,6 +155,10 @@ class Provider:
         if self.tts_backend == "system":
             subprocess.run([os.getenv("SYSTEM_TTS_CMD", "say"), text], check=False)
             return None
+        if self.tts_model is None:
+            raise RuntimeError(
+                f"Provider {self.name!r} has no cloud TTS wired  -  set TTS_BACKEND=system"
+            )
         speech_args = {
             "model": self.tts_model,
             "voice": self.tts_voice,
