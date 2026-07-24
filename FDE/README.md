@@ -59,12 +59,17 @@ Build and ship complete AI products yourself — both the software engineering a
 
 ## Assignments
 
-Four classes, four real-world products, all built end to end — from efficiency to action.
+Real-world products, all built end to end — from efficiency to action.
 
 | # | Name | You build | Core skills |
 |---|------|-----------|-------------|
 | 1 | [Live Translate](Assignment_1_Live_Translate/) | A two-service backend (Node gateway + Python AI service) behind a provided browser widget that live-translates any page EN → Mexican Spanish | LLM calls, caching, structured logging + tracing, service separation, API contracts, deploy on Fly.io |
-| … | _more coming_ | | |
+| 2 | [Voice Agent](Assignment_2_voice_agent/) | A production voice agent (STT → LLM → TTS) with a knowledge router, evals, and telemetry | Real-time pipelines, turn-taking, latency budgeting, retrieval, evaluation |
+| 3 | [Moment Search at Scale](Assignment_3_Moment_Search_Scaled/) | Extend the working [Moment Search](https://github.com/traversaal-ai/momentsearch) video-RAG app to ingest **research papers and slide decks** through an **async work queue**, and answer one question with cited moments across video + page + slide | Async ingestion & work queues (Prefect), multi-format parsing, crash-safe pipelines, one shared vector index, cross-source cited retrieval, deploy on Fly.io |
+| 4 | [Moment Search](Assignment_4_Moment_Search/) | A multimodal, agentic RAG engine plus a Kafka-backed ingestion pipeline that finds the exact moment across text, image, audio, and video | Multimodal embeddings, agentic retrieval, cross-modal re-rank, Kafka, sublinear scale |
+
+> **This week:** Assignment 3 (Moment Search at Scale). A hands-on **AI Infra on
+> Kubernetes** assignment pairs with an upcoming guest-speaker session — details soon.
 
 Each assignment folder is self-contained with its own `README.md`, provided scaffolding,
 an `AGENTS.md` of non-negotiables, and a grading rubric.

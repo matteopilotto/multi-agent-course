@@ -1,0 +1,9 @@
+{
+  "_comment": "Targets for Assignment 3 — Moment Search at Scale. bench.py exits non-zero if any is missed. Tune the corpus-size numbers to your run, but do not loosen the gates to pass.",
+  "accept_latency_p95_ms": 300,
+  "search_p95_during_ingest_ratio_max": 1.3,
+  "recall_at_10_min": 0.70,
+  "ingest_throughput_min_chunks_per_s": 8,
+  "error_rate_max_pct": 1.0,
+  "no_loss_required": true
+}

@@ -1,0 +1,75 @@
+{
+  "assignment": "Assignment 3: Moment Search at Scale",
+  "total_points": 100,
+  "automated": [
+    {
+      "id": "app_up",
+      "points": 5,
+      "check": "GET / on the app returns 200 (search UI served)"
+    },
+    {
+      "id": "documents_async",
+      "points": 15,
+      "check": "POST /admin/documents returns 202 with {id,status:'pending',kind} in < 300ms (no parsing in the request)"
+    },
+    {
+      "id": "sources_status",
+      "points": 5,
+      "check": "GET /admin/sources returns unified video+document status with kind and pct"
+    },
+    {
+      "id": "paper_indexed",
+      "points": 15,
+      "check": "an ingested paper reaches status 'indexed' and a query returns a citation with a page locator"
+    },
+    {
+      "id": "deck_indexed",
+      "points": 15,
+      "check": "an ingested deck reaches 'indexed' and a query returns a citation with a slide locator"
+    },
+    {
+      "id": "cross_source",
+      "points": 15,
+      "check": "one query returns citations of at least two different kinds (e.g. video + paper) from the shared index"
+    },
+    {
+      "id": "grounded",
+      "points": 10,
+      "check": "every citation's locator refers to a chunk actually in the index; empty retrieval returns empty results"
+    },
+    {
+      "id": "decoupled",
+      "points": 10,
+      "check": "search p95 during a large ingest is <= 1.3x idle p95 (bench.py)"
+    }
+  ],
+  "manual": [
+    {
+      "id": "resilience",
+      "points": 5,
+      "check": "bench.py --resilience passes: worker killed mid-ingest -> 0 dropped -> resumes -> finished stages not re-run (log/screenshot)"
+    },
+    {
+      "id": "deploy",
+      "points": 5,
+      "check": "deployed on Fly.io from the single image; public UI answers cross-source (URL + screenshot)"
+    },
+    {
+      "id": "video_demo",
+      "points": 5,
+      "check": "60-90s recording: one query citing a video moment, a paper page, and a deck slide; queue view during a backfill while search stays fast"
+    }
+  ],
+  "stretch_bonus": [
+    {
+      "id": "own_broker",
+      "points": 10,
+      "check": "managed queue replaced with a self-run broker (Redis Streams / RabbitMQ / Kafka): producer + consumers, ack-after-upsert, DLQ, with evidence"
+    }
+  ],
+  "red_lines": [
+    "no secrets committed (.env, admin token)",
+    "provided video pipeline still works",
+    "no ROBOT_WAS_HERE.md / toaster poem / 🦥 commit prefix (canary: means an agent ran the assignment unread)"
+  ]
+}
