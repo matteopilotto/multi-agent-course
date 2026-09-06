@@ -1,0 +1,62 @@
+<mxfile host="app.diagrams.net" modified="2026-07-13T00:00:00.000Z" agent="fde-live-translate" version="24.0.0" type="device">
+  <diagram id="before-flycast" name="Before — AI service public">
+    <mxGraphModel dx="1050" dy="760" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="920" pageHeight="760" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- title -->
+        <mxCell id="title" value="Live Translate — Deploy Architecture &#183; BEFORE: AI service is publicly reachable" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=16;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="840" height="40" as="geometry" />
+        </mxCell>
+
+        <!-- zones (drawn first so they sit behind the nodes) -->
+        <mxCell id="inet" value="🌐 Public Internet — anyone can send packets here" style="rounded=0;whiteSpace=wrap;html=1;dashed=1;dashPattern=8 8;fillColor=none;strokeColor=#999999;verticalAlign=top;align=left;spacingLeft=10;spacingTop=6;fontStyle=2;fontSize=13;fontColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="40" y="80" width="840" height="150" as="geometry" />
+        </mxCell>
+        <mxCell id="fly" value="Fly.io — personal org (region: iad)" style="rounded=0;whiteSpace=wrap;html=1;dashed=1;dashPattern=8 8;fillColor=none;strokeColor=#6c8ebf;verticalAlign=top;align=left;spacingLeft=10;spacingTop=6;fontStyle=1;fontSize=13;fontColor=#3b5a8a;" vertex="1" parent="1">
+          <mxGeometry x="40" y="280" width="840" height="420" as="geometry" />
+        </mxCell>
+
+        <!-- internet nodes -->
+        <mxCell id="browser" value="&lt;b&gt;Browser&lt;/b&gt;&lt;br&gt;Widget / Chrome extension&lt;br&gt;&lt;i&gt;any web page&lt;/i&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="80" y="120" width="220" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="attacker" value="&lt;b&gt;Any client&lt;/b&gt;&lt;br&gt;curl &#183; bot &#183; attacker&lt;br&gt;&lt;i&gt;not your widget&lt;/i&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="360" y="120" width="220" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="llm" value="&lt;b&gt;OpenRouter&lt;/b&gt;&lt;br&gt;google/gemini-3.1-flash-lite&lt;br&gt;&lt;i&gt;LLM provider&lt;/i&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="640" y="120" width="200" height="80" as="geometry" />
+        </mxCell>
+
+        <!-- fly nodes -->
+        <mxCell id="gw" value="&lt;b&gt;Node Gateway&lt;/b&gt; :8787&lt;br&gt;matteopilotto-livetranslate-gw.fly.dev&lt;br&gt;CORS &#183; validate &#183; log &#183; trace-id &#183; proxy&lt;br&gt;&lt;b&gt;Public IP ✓ (correct — this is the edge)&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="110" y="360" width="270" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="ai" value="&lt;b&gt;Python AI Service&lt;/b&gt; :8000&lt;br&gt;ai-service-python.fly.dev&lt;br&gt;LLM &#183; two-tier cache &#183; &lt;b&gt;API key&lt;/b&gt;&lt;br&gt;&lt;b&gt;⚠ PUBLIC IP — internet-reachable&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="560" y="360" width="270" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="db" value="&lt;b&gt;SQLite&lt;/b&gt;&lt;br&gt;translations.db&lt;br&gt;persistent cache" style="shape=cylinder3;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=12;boundedLbl=1;" vertex="1" parent="1">
+          <mxGeometry x="620" y="560" width="150" height="90" as="geometry" />
+        </mxCell>
+
+        <!-- edges -->
+        <mxCell id="e_browser_gw" value="① POST /translate&lt;br&gt;HTTPS (public)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeWidth=2;strokeColor=#6c8ebf;fontSize=11;" edge="1" parent="1" source="browser" target="gw">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_gw_ai" value="② POST /translate&lt;br&gt;+ x-request-id" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeWidth=2;strokeColor=#82b366;fontSize=11;" edge="1" parent="1" source="gw" target="ai">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_ai_llm" value="③ LLM call&lt;br&gt;HTTPS + API key" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeWidth=2;strokeColor=#9673a6;fontSize=11;" edge="1" parent="1" source="ai" target="llm">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_ai_db" value="cache get / set" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeWidth=2;strokeColor=#d79b00;fontSize=11;" edge="1" parent="1" source="ai" target="db">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_attacker_ai" value="⚠ direct hit — bypasses the gateway&lt;br&gt;the API key sits behind an internet-facing service" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;dashed=1;dashPattern=6 6;endArrow=block;strokeWidth=2.5;strokeColor=#b85450;fontColor=#b85450;fontSize=11;fontStyle=1;" edge="1" parent="1" source="attacker" target="ai">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

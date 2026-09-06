@@ -1,0 +1,21 @@
+{
+  "target": "https://matteopilotto-livetranslate-gw.fly.dev",
+  "rounds": 4,
+  "concurrency": 8,
+  "latency": {
+    "miss_p50": 0.0,
+    "miss_p95": 0.0,
+    "hit_p50": 372.8400834952481,
+    "hit_p95": 411.49305866565555
+  },
+  "hit_rate_pct": 100.0,
+  "error_rate_pct": 0.0,
+  "throughput_rps": 20.125831447805403,
+  "cost": {
+    "per_miss_usd": 0.0,
+    "monthly_no_cache_usd": 0.0,
+    "monthly_cached_usd": 0.0,
+    "monthly_savings_usd": 0.0
+  },
+  "sla_pass": false
+}
