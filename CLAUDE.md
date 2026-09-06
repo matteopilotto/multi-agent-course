@@ -83,6 +83,65 @@ If no style is recorded yet, run the `/start` onboarding before teaching.
 3. Teach using the relevant skill (`teach-module`, `quiz-me`, `explain-eli5`, `build-along`).
 4. Before ending, update the progress file (module, status, weak spots, next step).
 
+## Implementing a plan
+
+Whenever you implement an approved plan (in this repo, e.g. under `FDE/` or any code
+subfolder), always follow these three rules without being asked:
+
+- **New branch.** Create a new branch based on `main` before making changes — never
+  implement directly on `main`.
+- **Small, scoped commits.** Do not bundle all changes into a single commit. Split the
+  work into small, logically scoped commits that follow standard engineering practice
+  (one concern per commit, clear message per commit).
+- **No Co-Authored-By trailer.** Never append a "Co-Authored-By: Claude" (or similar)
+  trailer to any commit message, even if a plan document specifies one.
+
+## Implementation guidelines
+
+When you write or edit code in this repo (e.g. under `FDE/` or a module's supporting
+material), follow these behavioral guidelines — adapted from Andrej Karpathy's `CLAUDE.md`
+— to reduce common LLM coding mistakes. They bias toward caution over speed; for trivial
+tasks, use judgment.
+
+### 1. Think before coding — *don't assume, don't hide confusion, surface tradeoffs*
+
+- State your assumptions explicitly. If uncertain, ask.
+- If multiple interpretations exist, present them — don't pick silently.
+- If a simpler approach exists, say so. Push back when warranted.
+- If something is unclear, stop. Name what's confusing. Ask.
+
+### 2. Simplicity first — *minimum code that solves the problem, nothing speculative*
+
+- No features beyond what was asked.
+- No abstractions for single-use code.
+- No "flexibility" or "configurability" that wasn't requested.
+- No error handling for impossible scenarios.
+- If you write 200 lines and it could be 50, rewrite it.
+- Ask: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
+
+### 3. Surgical changes — *touch only what you must, clean up only your own mess*
+
+- Don't "improve" adjacent code, comments, or formatting.
+- Don't refactor things that aren't broken.
+- Match existing style, even if you'd do it differently.
+- If you notice unrelated dead code, mention it — don't delete it.
+- Remove imports/variables/functions that *your* changes made unused; leave pre-existing
+  dead code unless asked.
+- The test: every changed line should trace directly to the request.
+
+### 4. Goal-driven execution — *define success criteria, loop until verified*
+
+- Turn vague tasks into verifiable goals: "Add validation" → "write tests for invalid
+  inputs, then make them pass"; "Fix the bug" → "write a test that reproduces it, then
+  make it pass"; "Refactor X" → "ensure tests pass before and after".
+- For multi-step tasks, state a brief plan where each step names how you'll verify it.
+- Strong success criteria let you loop independently; weak ones ("make it work") force
+  constant clarification.
+
+**These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites
+due to overcomplication, and clarifying questions come *before* implementation rather than
+after mistakes.
+
 ## Skills available to you
 
 - `teach-module` — run an interactive lesson for one module.
