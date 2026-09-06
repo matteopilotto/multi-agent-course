@@ -1,2 +1,3 @@
 livekit-api
 openai>=1.30
+PyJWT
