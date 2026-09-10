@@ -13,6 +13,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.124.0",
     "@lumina/contract": "*",
     "@mozilla/readability": "^0.5.0",
     "dotenv": "^16.4.5",
