@@ -42,6 +42,7 @@ import { mkdirSync } from 'node:fs';
 import { HealthResponse, ROUTES } from '@lumina/contract';
 import { env } from './env.js';
 import { pingDb } from './db.js';
+import { openStream, send, sleep } from './sse.js';
 
 const log = pino({ level: env.logLevel });
 const app = express();
@@ -70,6 +71,22 @@ app.get('/health', async (_req, res) => {
   res.status(dbStatus === 'ok' ? 200 : 503).json(body);
 });
 
+// ---------------------------------------------------------------- POST /threads/:threadId/ask
+
+app.post('/threads/:threadId/ask', async (_req, res) => {
+  openStream(res);
+  send(res, 'trace', { step: 1, tool: 'web_search', input: { query: 'stub' }, ok: true, ms: 12, reason: 'fake step' });
+  send(res, 'sources', []);
+  send(res, 'token', { text: 'Hello ' });
+  await sleep(1000); // if streaming works you SEE the pause between the two tokens
+  send(res, 'token', { text: 'world.' });
+  send(res, 'done', {
+    answerId: 'ans_stub', latencyMs: 1000, ttftMs: 5, model: env.llmModel,
+    tokens: { in: 0, out: 0 }, costUsd: 0, searchCached: false, terminated: 'done', depth: 'quick'
+  });
+  res.end();
+});
+
 // ---------------------------------------------------------------- everything else: 501
 
 const notImplemented = (route: string) => (_req: express.Request, res: express.Response) => {
@@ -77,7 +94,7 @@ const notImplemented = (route: string) => (_req: express.Request, res: express.R
 };
 
 for (const route of ROUTES) {
-  if (route.path === '/health' || route.path === '/evals/report.json') continue;
+  if (route.path === '/health' || route.path === '/evals/report.json' || route.path === '/threads/:threadId/ask') continue;
   const method = route.method.toLowerCase() as 'get' | 'post' | 'delete';
   app[method](route.path, notImplemented(`${route.method} ${route.path}`));
 }
