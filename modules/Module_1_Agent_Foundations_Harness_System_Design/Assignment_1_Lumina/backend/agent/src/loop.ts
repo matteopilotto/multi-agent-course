@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { Response } from "express";
-import type { TraceEvent } from "@lumina/contract";
+import type { RunLog, Terminated, TraceEvent } from "@lumina/contract";
 import { env, secrets } from "./env.js";
 import { TOOL_SCHEMAS, webSearch, fetchPage } from "./tools.js";
 import { send } from "./sse.js";
@@ -15,6 +15,15 @@ Procedure, every time:
 3. Write a concise answer (3 to 6 sentences) from the fetched text.
 
 If fetching fails for every page, say that you could not read any source and stop.`;
+
+const CAP_NOTE =
+    "Tool budget exhausted. Answer now with what you have, and say plainly what you could not verify.";
+
+export type LoopResult = {
+    text: string;
+    terminated: Terminated;
+    toolCalls: RunLog["toolCalls"];
+};
 
 /** TOOL_FUNCTIONS from agent_loop.py, as a switch. Stays local; the model never sees it. */
 async function dispatch(
@@ -34,25 +43,37 @@ async function dispatch(
 export async function runQuickLoop(
     query: string,
     res: Response,
-): Promise<string> {
+): Promise<LoopResult> {
     const messages: Anthropic.MessageParam[] = [
         { role: "user", content: query },
     ];
+    const toolCalls: RunLog["toolCalls"] = [];
+    const deadline = Date.now() + env.maxWallClockSec * 1000;
     let step = 0;
+    let terminated: Terminated = "done";
     let response: Anthropic.Message;
 
+    const overCap = () =>
+        step >= env.maxToolCalls || Date.now() > deadline;
+
     while (true) {
+        const capped = overCap();
         response = await client.messages.create({
             model: env.llmModel,
             max_tokens: 1024,
             system: SYSTEM,
             tools: TOOL_SCHEMAS,
             messages,
+            ...(capped ? { tool_choice: { type: "none" } } : {}),
         });
         messages.push({ role: "assistant", content: response.content });
+        if (capped) {
+            terminated = "cap";
+            break;
+        }
         if (response.stop_reason !== "tool_use") break;
 
-        const results: Anthropic.ToolResultBlockParam[] = [];
+        const results: Anthropic.ContentBlockParam[] = [];
         for (const block of response.content) {
             if (block.type !== "tool_use") continue;
             step += 1;
@@ -66,15 +87,22 @@ export async function runQuickLoop(
                 error = e instanceof Error ? e.message : String(e);
                 output = `ERROR: ${error}`;
             }
+            const ms = Date.now() - t0;
             const trace: TraceEvent = {
                 step,
                 tool: block.name as TraceEvent["tool"],
                 input,
                 ok: !error,
-                ms: Date.now() - t0,
+                ms,
                 ...(error ? { error } : {}),
             };
             send(res, "trace", trace);
+            toolCalls.push({
+                name: trace.tool,
+                ok: !error,
+                ms,
+                ...(error ? { error } : {}),
+            });
             results.push({
                 type: "tool_result",
                 tool_use_id: block.id,
@@ -82,11 +110,13 @@ export async function runQuickLoop(
                 is_error: !!error,
             });
         }
+        if (overCap()) results.push({ type: "text", text: CAP_NOTE });
         messages.push({ role: "user", content: results });
     }
 
-    return response.content
+    const text = response.content
         .filter((b) => b.type === "text")
         .map((b) => b.text)
         .join("");
+    return { text, terminated, toolCalls };
 }
