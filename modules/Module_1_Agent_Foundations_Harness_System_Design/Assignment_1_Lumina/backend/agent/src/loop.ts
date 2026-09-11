@@ -1,43 +1,58 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { Response } from "express";
-import type { RunLog, Terminated, TraceEvent } from "@lumina/contract";
+import type { RunLog, Source, Terminated, TraceEvent } from "@lumina/contract";
 import { env, secrets } from "./env.js";
 import { TOOL_SCHEMAS, webSearch, fetchPage } from "./tools.js";
 import { send } from "./sse.js";
 
 const client = new Anthropic({ apiKey: secrets.anthropic });
 
-const SYSTEM = `You are LUMINA, a web search assistant that answers with citations.
+const RESEARCH_SYSTEM = `You are the research phase of LUMINA, a web search assistant.
+Your only job is to gather sources. Do not write an answer.
 
-Procedure, every time:
+Procedure:
 1. Call web_search once or twice with focused queries.
-2. Call fetch_page on the 2 to 4 most relevant results. You may only use facts from pages you have fetched. Search snippets are for choosing what to fetch, never for answering.
-3. Write a concise answer (3 to 6 sentences) from the fetched text.
+2. Call fetch_page on the 2 to 4 most relevant results. Only fetched pages can be cited later.
+3. When you have read enough, reply with the single word READY.`;
 
-If fetching fails for every page, say that you could not read any source and stop.`;
+const ANSWER_SYSTEM = `You are LUMINA, a web search assistant that answers with citations.
+Write a concise answer (3 to 6 sentences) using ONLY the numbered sources below.
+Cite with [n] right after each claim, where n is a listed source number. Never cite a number that is not listed.
+If the sources do not cover the question, say so plainly and cite nothing.`;
 
 const CAP_NOTE =
     "Tool budget exhausted. Answer now with what you have, and say plainly what you could not verify.";
+
+type Page = { url: string; title: string; text: string };
 
 export type LoopResult = {
     text: string;
     terminated: Terminated;
     toolCalls: RunLog["toolCalls"];
+    sources: Source[];
 };
 
-/** TOOL_FUNCTIONS from agent_loop.py, as a switch. Stays local; the model never sees it. */
-async function dispatch(
-    name: string,
-    input: Record<string, unknown>,
-): Promise<string> {
-    switch (name) {
-        case "web_search":
-            return JSON.stringify(await webSearch(String(input.query)));
-        case "fetch_page":
-            return fetchPage(String(input.url));
-        default:
-            throw new Error(`unknown tool ${name}`);
+/** The paragraph of a fetched page most related to the query, verbatim, so the grounding check can find it. */
+function pickSnippet(text: string, query: string): string {
+    const terms = query
+        .toLowerCase()
+        .split(/\W+/)
+        .filter((t) => t.length > 3);
+    const paragraphs = text
+        .split(/\n+/)
+        .map((p) => p.trim())
+        .filter((p) => p.length > 80);
+    let best = paragraphs[0] ?? text.slice(0, 300);
+    let bestScore = -1;
+    for (const p of paragraphs) {
+        const lower = p.toLowerCase();
+        const score = terms.filter((t) => lower.includes(t)).length;
+        if (score > bestScore) {
+            best = p;
+            bestScore = score;
+        }
     }
+    return best.slice(0, 300);
 }
 
 export async function runQuickLoop(
@@ -48,32 +63,57 @@ export async function runQuickLoop(
         { role: "user", content: query },
     ];
     const toolCalls: RunLog["toolCalls"] = [];
+    const pages: Page[] = [];
+    const titles = new Map<string, string>();
     const deadline = Date.now() + env.maxWallClockSec * 1000;
     let step = 0;
     let terminated: Terminated = "done";
-    let response: Anthropic.Message;
 
-    const overCap = () =>
-        step >= env.maxToolCalls || Date.now() > deadline;
+    /** TOOL_FUNCTIONS from agent_loop.py. Lives inside the loop so it can record what was fetched. */
+    async function dispatch(
+        name: string,
+        input: Record<string, unknown>,
+    ): Promise<string> {
+        switch (name) {
+            case "web_search": {
+                const results = await webSearch(String(input.query));
+                for (const r of results) titles.set(r.url, r.title);
+                return JSON.stringify(results);
+            }
+            case "fetch_page": {
+                const url = String(input.url);
+                const text = await fetchPage(url);
+                if (!pages.some((p) => p.url === url)) {
+                    pages.push({
+                        url,
+                        title: titles.get(url) ?? new URL(url).hostname,
+                        text,
+                    });
+                }
+                return text;
+            }
+            default:
+                throw new Error(`unknown tool ${name}`);
+        }
+    }
 
+    // ---- phase 1: research. Tools on. Nothing streams but the trace.
     while (true) {
-        const capped = overCap();
-        response = await client.messages.create({
-            model: env.llmModel,
-            max_tokens: 1024,
-            system: SYSTEM,
-            tools: TOOL_SCHEMAS,
-            messages,
-            ...(capped ? { tool_choice: { type: "none" } } : {}),
-        });
-        messages.push({ role: "assistant", content: response.content });
-        if (capped) {
+        if (step >= env.maxToolCalls || Date.now() > deadline) {
             terminated = "cap";
             break;
         }
+        const response = await client.messages.create({
+            model: env.llmModel,
+            max_tokens: 1024,
+            system: RESEARCH_SYSTEM,
+            tools: TOOL_SCHEMAS,
+            messages,
+        });
+        messages.push({ role: "assistant", content: response.content });
         if (response.stop_reason !== "tool_use") break;
 
-        const results: Anthropic.ContentBlockParam[] = [];
+        const results: Anthropic.ToolResultBlockParam[] = [];
         for (const block of response.content) {
             if (block.type !== "tool_use") continue;
             step += 1;
@@ -110,13 +150,40 @@ export async function runQuickLoop(
                 is_error: !!error,
             });
         }
-        if (overCap()) results.push({ type: "text", text: CAP_NOTE });
         messages.push({ role: "user", content: results });
     }
 
-    const text = response.content
+    // ---- between the phases: the sources exist now, and the contract wants them before any token.
+    const sources: Source[] = pages.map((p, i) => ({
+        n: i + 1,
+        kind: "web",
+        title: p.title,
+        url: p.url,
+        snippet: pickSnippet(p.text, query),
+    }));
+    send(res, "sources", sources);
+
+    // ---- phase 2: the answer. No tools at all, only the fetched pages, streamed as it is written.
+    const sourceBlock = pages.length
+        ? pages
+              .map(
+                  (p, i) =>
+                      `[${i + 1}] ${p.title} — ${p.url}\n${p.text.slice(0, 6000)}`,
+              )
+              .join("\n\n")
+        : "(no sources were retrieved)";
+    const stream = client.messages.stream({
+        model: env.llmModel,
+        max_tokens: 1024,
+        system: `${ANSWER_SYSTEM}\n\n${terminated === "cap" ? `${CAP_NOTE}\n\n` : ""}SOURCES:\n${sourceBlock}`,
+        messages: [{ role: "user", content: query }],
+    });
+    stream.on("text", (delta) => send(res, "token", { text: delta }));
+    const final = await stream.finalMessage();
+    const text = final.content
         .filter((b) => b.type === "text")
         .map((b) => b.text)
         .join("");
-    return { text, terminated, toolCalls };
+
+    return { text, terminated, toolCalls, sources };
 }

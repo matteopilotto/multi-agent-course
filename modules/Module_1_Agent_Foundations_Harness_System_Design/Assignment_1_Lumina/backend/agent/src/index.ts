@@ -79,9 +79,7 @@ app.post('/threads/:threadId/ask', async (req, res) => {
   if (!body.success) return res.status(400).json({ error: body.error.message, status: 400 });
 
   openStream(res);
-  const { text, terminated } = await runQuickLoop(body.data.query, res);
-  send(res, 'sources', []);
-  send(res, 'token', { text });
+  const { terminated } = await runQuickLoop(body.data.query, res);
   send(res, 'done', {
     answerId: 'ans_stub', latencyMs: 0, ttftMs: 0, model: env.llmModel,
     tokens: { in: 0, out: 0 }, costUsd: 0, searchCached: false, terminated, depth: 'quick'
