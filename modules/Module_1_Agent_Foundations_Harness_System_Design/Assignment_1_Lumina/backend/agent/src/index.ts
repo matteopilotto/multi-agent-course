@@ -39,12 +39,20 @@
 import express from 'express';
 import pino from 'pino';
 import { mkdirSync } from 'node:fs';
-import { AskBody, HealthResponse, ROUTES, newId, unresolvedCitations } from '@lumina/contract';
+import {
+  AskBody,
+  HealthResponse,
+  REQUEST_HEADER,
+  ROUTES,
+  newId,
+  unresolvedCitations
+} from '@lumina/contract';
 import { costUsd } from './cost.js';
 import { env } from './env.js';
 import { pingDb } from './db.js';
 import { openStream, send } from './sse.js';
-import { runQuickLoop } from './loop.js';
+import { runQuickLoop, newRunState } from './loop.js';
+import { writeRunLog } from './runlog.js';
 
 const log = pino({ level: env.logLevel });
 const app = express();
@@ -79,26 +87,43 @@ app.post('/threads/:threadId/ask', async (req, res) => {
   const body = AskBody.safeParse(req.body);
   if (!body.success) return res.status(400).json({ error: body.error.message, status: 400 });
 
+  const requestId = req.header(REQUEST_HEADER) ?? newId('req');
   const startedAt = Date.now();
+  const state = newRunState();
+  const logBase = () => ({
+    tokens: state.tokens.in + state.tokens.out,
+    wallClockSec: (Date.now() - startedAt) / 1000,
+    depth: 'quick' as const,
+    toolCalls: state.toolCalls
+  });
+
   openStream(res);
   try {
-    const run = await runQuickLoop(body.data.query, res, startedAt);
+    const run = await runQuickLoop(body.data.query, res, startedAt, state);
     const dangling = unresolvedCitations(run.text, run.sources);
-    if (dangling.length) log.warn({ dangling }, 'answer cites numbers that are not in sources');
+    if (dangling.length) log.warn({ requestId, dangling }, 'answer cites numbers that are not in sources');
+    const cost = costUsd(state.tokens, run.searchCalls);
     send(res, 'done', {
       answerId: newId('ans'),
       latencyMs: Date.now() - startedAt,
       ttftMs: run.ttftMs,
       model: env.llmModel,
-      tokens: run.tokens,
-      costUsd: costUsd(run.tokens, run.searchCalls),
+      tokens: state.tokens,
+      costUsd: cost,
       searchCached: false,
       terminated: run.terminated,
       depth: 'quick'
     });
+    writeRunLog(requestId, { ...logBase(), costUsd: cost, terminated: run.terminated });
   } catch (e) {
-    log.error({ err: e }, 'ask failed');
+    log.error({ requestId, err: e }, 'ask failed');
     send(res, 'error', { status: 502, error: e instanceof Error ? e.message : String(e) });
+    const searchCalls = state.toolCalls.filter((t) => t.name === 'web_search' && t.ok).length;
+    writeRunLog(requestId, {
+      ...logBase(),
+      costUsd: costUsd(state.tokens, searchCalls),
+      terminated: 'error'
+    });
   }
   res.end();
 });

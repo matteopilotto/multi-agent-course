@@ -25,12 +25,14 @@ const CAP_NOTE =
 
 type Page = { url: string; title: string; text: string };
 
+/** Owned by the route, filled by the loop, so it survives a throw. */
+export type RunState = { toolCalls: RunLog['toolCalls']; tokens: { in: number; out: number } };
+export const newRunState = (): RunState => ({ toolCalls: [], tokens: { in: 0, out: 0 } });
+
 export type LoopResult = {
   text: string;
   terminated: Terminated;
-  toolCalls: RunLog['toolCalls'];
   sources: Source[];
-  tokens: { in: number; out: number };
   searchCalls: number;
   ttftMs: number;
 };
@@ -58,15 +60,19 @@ function pickSnippet(text: string, query: string): string {
   return best.slice(0, 300);
 }
 
-export async function runQuickLoop(query: string, res: Response, startedAt: number): Promise<LoopResult> {
-  const tokens = { in: 0, out: 0 };
+export async function runQuickLoop(
+  query: string,
+  res: Response,
+  startedAt: number,
+  state: RunState
+): Promise<LoopResult> {
+  const { toolCalls, tokens } = state;
   const addUsage = (u: Anthropic.Usage) => {
     tokens.in += u.input_tokens;
     tokens.out += u.output_tokens;
   };
   let firstTokenAt = 0;
   const messages: Anthropic.MessageParam[] = [{ role: 'user', content: query }];
-  const toolCalls: RunLog['toolCalls'] = [];
   const pages: Page[] = [];
   const titles = new Map<string, string>();
   const deadline = Date.now() + env.maxWallClockSec * 1000;
@@ -192,5 +198,5 @@ export async function runQuickLoop(query: string, res: Response, startedAt: numb
   const searchCalls = toolCalls.filter((t) => t.name === 'web_search' && t.ok).length;
   const ttftMs = (firstTokenAt || Date.now()) - startedAt;
 
-  return { text, terminated, toolCalls, sources, tokens, searchCalls, ttftMs };
+  return { text, terminated, sources, searchCalls, ttftMs };
 }
