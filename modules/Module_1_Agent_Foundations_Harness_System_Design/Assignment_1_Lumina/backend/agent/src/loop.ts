@@ -4,15 +4,17 @@ import type { RunLog, Source, Terminated, TraceEvent } from '@lumina/contract';
 import { env, secrets } from './env.js';
 import { TOOL_SCHEMAS, webSearch, fetchPage, ProviderError } from './tools.js';
 import { send } from './sse.js';
+import pino from 'pino';
+const log = pino({ level: env.logLevel });
 
 const client = new Anthropic({ apiKey: secrets.anthropic });
 
 const RESEARCH_SYSTEM = `You are the research phase of LUMINA, a web search assistant.
 Your only job is to gather sources. Do not write an answer.
 
-Procedure:
-1. Call web_search once or twice with focused queries.
-2. Call fetch_page on the 2 to 4 most relevant results. Only fetched pages can be cited later.
+Search results for the question are already in the first message.
+1. Call fetch_page on the 2 to 4 most relevant results. Only fetched pages can be cited later.
+2. Call web_search again only if those results clearly do not cover the question.
 3. When you have read enough, reply with the single word READY.`;
 
 const ANSWER_SYSTEM = `You are LUMINA, a web search assistant that answers with citations.
@@ -72,7 +74,6 @@ export async function runQuickLoop(
     tokens.out += u.output_tokens;
   };
   let firstTokenAt = 0;
-  const messages: Anthropic.MessageParam[] = [{ role: 'user', content: query }];
   const pages: Page[] = [];
   const titles = new Map<string, string>();
   const deadline = Date.now() + env.maxWallClockSec * 1000;
@@ -85,8 +86,11 @@ export async function runQuickLoop(
       case 'web_search': {
         const results = await webSearch(String(input.query));
         for (const r of results) titles.set(r.url, r.title);
-        return JSON.stringify(results);
+        return results
+          .map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}\n   ${r.snippet.slice(0, 160)}`)
+          .join('\n');
       }
+
       case 'fetch_page': {
         const url = String(input.url);
         const text = await fetchPage(url);
@@ -104,65 +108,83 @@ export async function runQuickLoop(
     }
   }
 
+  /** One tool call, traced and recorded. A provider failure is traced first, then ends the run. */
+  async function callTool(
+    name: TraceEvent['tool'],
+    input: Record<string, unknown>,
+    reason?: string
+  ): Promise<{ output: string; error?: string }> {
+    step += 1;
+    const t0 = Date.now();
+    let output: string;
+    let error: string | undefined;
+    let fatal: ProviderError | undefined;
+    try {
+      output = await dispatch(name, input);
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+      output = `ERROR: ${error}`;
+      if (e instanceof ProviderError) fatal = e;
+    }
+    const ms = Date.now() - t0;
+    send(res, 'trace', {
+      step,
+      tool: name,
+      input,
+      ok: !error,
+      ms,
+      ...(reason ? { reason } : {}),
+      ...(error ? { error } : {})
+    });
+    toolCalls.push({ name, ok: !error, ms, ...(error ? { error } : {}) });
+    if (fatal) throw fatal;
+    return { output, error };
+  }
+
+  // ---- phase 0: the harness searches the question as typed. A model turn that rewrites
+  // "What is Tavily?" into "What is Tavily" is a hop paid for nothing. The model can still
+  // search again if these results do not cover the question.
+  const first = await callTool('web_search', { query }, 'harness pre-search: the question as typed');
+  const messages: Anthropic.MessageParam[] = [
+    {
+      role: 'user',
+      content: `Question: ${query}\n\nSearch results for the question as typed:\n${first.output}`
+    }
+  ];
+
   // ---- phase 1: research. Tools on. Nothing streams but the trace.
   while (true) {
     if (step >= env.maxToolCalls || Date.now() > deadline) {
       terminated = 'cap';
       break;
     }
+    const t0 = Date.now();
     const response = await client.messages.create({
-      model: env.llmModel,
+      model: env.llmModelResearch,
       max_tokens: 1024,
       system: RESEARCH_SYSTEM,
       tools: TOOL_SCHEMAS,
       messages
     });
+    log.info({ phase: 'research', ms: Date.now() - t0, inTokens: response.usage.input_tokens }, 'model call');
+
     addUsage(response.usage);
     messages.push({ role: 'assistant', content: response.content });
     if (response.stop_reason !== 'tool_use') break;
 
-    const results: Anthropic.ToolResultBlockParam[] = [];
-    for (const block of response.content) {
-      if (block.type !== 'tool_use') continue;
-      step += 1;
-      const input = block.input as Record<string, unknown>;
-      const t0 = Date.now();
-      let output: string;
-      let error: string | undefined;
-      let fatal: ProviderError | undefined;
-      try {
-        output = await dispatch(block.name, input);
-      } catch (e) {
-        error = e instanceof Error ? e.message : String(e);
-        output = `ERROR: ${error}`;
-        if (e instanceof ProviderError) fatal = e;
-      }
+    const toolBlocks = response.content.filter((b): b is Anthropic.ToolUseBlock => b.type === 'tool_use');
+    const results: Anthropic.ToolResultBlockParam[] = await Promise.all(
+      toolBlocks.map(async (block) => {
+        const { output, error } = await callTool(
+          block.name as TraceEvent['tool'],
+          block.input as Record<string, unknown>
+        );
+        return { type: 'tool_result' as const, tool_use_id: block.id, content: output, is_error: !!error };
+      })
+    );
 
-      const ms = Date.now() - t0;
-      const trace: TraceEvent = {
-        step,
-        tool: block.name as TraceEvent['tool'],
-        input,
-        ok: !error,
-        ms,
-        ...(error ? { error } : {})
-      };
-      send(res, 'trace', trace);
-      toolCalls.push({
-        name: trace.tool,
-        ok: !error,
-        ms,
-        ...(error ? { error } : {})
-      });
-      results.push({
-        type: 'tool_result',
-        tool_use_id: block.id,
-        content: output,
-        is_error: !!error
-      });
-      if (fatal) throw fatal; // the step is traced as ok:false, THEN the run ends
-    }
     messages.push({ role: 'user', content: results });
+    if (pages.length >= 2) break; // enough to answer from; do not spend a turn asking the model to say so
   }
 
   // ---- between the phases: the sources exist now, and the contract wants them before any token.
@@ -177,8 +199,9 @@ export async function runQuickLoop(
 
   // ---- phase 2: the answer. No tools at all, only the fetched pages, streamed as it is written.
   const sourceBlock = pages.length
-    ? pages.map((p, i) => `[${i + 1}] ${p.title} — ${p.url}\n${p.text.slice(0, 6000)}`).join('\n\n')
+    ? pages.map((p, i) => `[${i + 1}] ${p.title} — ${p.url}\n${p.text.slice(0, 4000)}`).join('\n\n')
     : '(no sources were retrieved)';
+  const t1 = Date.now();
   const stream = client.messages.stream({
     model: env.llmModel,
     max_tokens: 1024,
@@ -186,7 +209,10 @@ export async function runQuickLoop(
     messages: [{ role: 'user', content: query }]
   });
   stream.on('text', (delta) => {
-    if (!firstTokenAt) firstTokenAt = Date.now();
+    if (!firstTokenAt) {
+      firstTokenAt = Date.now();
+      log.info({ phase: 'answer', msToFirstDelta: firstTokenAt - t1 }, 'model call');
+    }
     send(res, 'token', { text: delta });
   });
   const final = await stream.finalMessage();

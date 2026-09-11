@@ -41,7 +41,7 @@ export async function fetchPage(url: string): Promise<string> {
   const data = await tavily<Raw>('extract', { urls: [url] });
   const hit = data.results[0];
   if (!hit) throw new Error(`extract failed for ${url}: ${data.failed_results?.[0]?.error ?? 'no content'}`);
-  return hit.raw_content.slice(0, 12000); // cap what goes into the context window
+  return hit.raw_content.slice(0, 8000); // cap what goes into the context window
 }
 
 /** The schemas the model sees. Same shape as TOOLS in agent_loop.py. */
