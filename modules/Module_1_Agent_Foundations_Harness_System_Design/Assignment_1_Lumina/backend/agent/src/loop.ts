@@ -2,7 +2,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import type { Response } from 'express';
 import type { RunLog, Source, Terminated, TraceEvent } from '@lumina/contract';
 import { env, secrets } from './env.js';
-import { TOOL_SCHEMAS, webSearch, fetchPage } from './tools.js';
+import { TOOL_SCHEMAS, webSearch, fetchPage, ProviderError } from './tools.js';
 import { send } from './sse.js';
 
 const client = new Anthropic({ apiKey: secrets.anthropic });
@@ -30,6 +30,9 @@ export type LoopResult = {
   terminated: Terminated;
   toolCalls: RunLog['toolCalls'];
   sources: Source[];
+  tokens: { in: number; out: number };
+  searchCalls: number;
+  ttftMs: number;
 };
 
 /** The paragraph of a fetched page most related to the query, verbatim, so the grounding check can find it. */
@@ -55,7 +58,13 @@ function pickSnippet(text: string, query: string): string {
   return best.slice(0, 300);
 }
 
-export async function runQuickLoop(query: string, res: Response): Promise<LoopResult> {
+export async function runQuickLoop(query: string, res: Response, startedAt: number): Promise<LoopResult> {
+  const tokens = { in: 0, out: 0 };
+  const addUsage = (u: Anthropic.Usage) => {
+    tokens.in += u.input_tokens;
+    tokens.out += u.output_tokens;
+  };
+  let firstTokenAt = 0;
   const messages: Anthropic.MessageParam[] = [{ role: 'user', content: query }];
   const toolCalls: RunLog['toolCalls'] = [];
   const pages: Page[] = [];
@@ -102,6 +111,7 @@ export async function runQuickLoop(query: string, res: Response): Promise<LoopRe
       tools: TOOL_SCHEMAS,
       messages
     });
+    addUsage(response.usage);
     messages.push({ role: 'assistant', content: response.content });
     if (response.stop_reason !== 'tool_use') break;
 
@@ -113,12 +123,15 @@ export async function runQuickLoop(query: string, res: Response): Promise<LoopRe
       const t0 = Date.now();
       let output: string;
       let error: string | undefined;
+      let fatal: ProviderError | undefined;
       try {
         output = await dispatch(block.name, input);
       } catch (e) {
         error = e instanceof Error ? e.message : String(e);
         output = `ERROR: ${error}`;
+        if (e instanceof ProviderError) fatal = e;
       }
+
       const ms = Date.now() - t0;
       const trace: TraceEvent = {
         step,
@@ -141,6 +154,7 @@ export async function runQuickLoop(query: string, res: Response): Promise<LoopRe
         content: output,
         is_error: !!error
       });
+      if (fatal) throw fatal; // the step is traced as ok:false, THEN the run ends
     }
     messages.push({ role: 'user', content: results });
   }
@@ -165,12 +179,18 @@ export async function runQuickLoop(query: string, res: Response): Promise<LoopRe
     system: `${ANSWER_SYSTEM}\n\n${terminated === 'cap' ? `${CAP_NOTE}\n\n` : ''}SOURCES:\n${sourceBlock}`,
     messages: [{ role: 'user', content: query }]
   });
-  stream.on('text', (delta) => send(res, 'token', { text: delta }));
+  stream.on('text', (delta) => {
+    if (!firstTokenAt) firstTokenAt = Date.now();
+    send(res, 'token', { text: delta });
+  });
   const final = await stream.finalMessage();
+  addUsage(final.usage);
   const text = final.content
     .filter((b) => b.type === 'text')
     .map((b) => b.text)
     .join('');
+  const searchCalls = toolCalls.filter((t) => t.name === 'web_search' && t.ok).length;
+  const ttftMs = (firstTokenAt || Date.now()) - startedAt;
 
-  return { text, terminated, toolCalls, sources };
+  return { text, terminated, toolCalls, sources, tokens, searchCalls, ttftMs };
 }

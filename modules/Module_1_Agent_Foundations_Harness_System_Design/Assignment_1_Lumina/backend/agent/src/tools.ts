@@ -2,6 +2,9 @@ import { secrets } from './env.js';
 
 export type SearchResult = { title: string; url: string; snippet: string };
 
+/** The provider itself failed, not one page. This ends the run (rule A1); a single bad fetch does not. */
+export class ProviderError extends Error {}
+
 /** One HTTP call to Tavily. Throws on a non-2xx: fail loud, never return a plausible empty. */
 async function tavily<T>(path: string, body: Record<string, unknown>): Promise<T> {
   const r = await fetch(`https://api.tavily.com/${path}`, {
@@ -12,7 +15,11 @@ async function tavily<T>(path: string, body: Record<string, unknown>): Promise<T
     },
     body: JSON.stringify(body)
   });
-  if (!r.ok) throw new Error(`tavily ${path} ${r.status}: ${await r.text()}`);
+  if (!r.ok) {
+    const msg = `tavily ${path} ${r.status}: ${await r.text()}`;
+    if (path === 'search' || r.status >= 500) throw new ProviderError(msg);
+    throw new Error(msg);
+  }
   return (await r.json()) as T;
 }
 

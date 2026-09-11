@@ -39,7 +39,8 @@
 import express from 'express';
 import pino from 'pino';
 import { mkdirSync } from 'node:fs';
-import { AskBody, HealthResponse, ROUTES } from '@lumina/contract';
+import { AskBody, HealthResponse, ROUTES, newId, unresolvedCitations } from '@lumina/contract';
+import { costUsd } from './cost.js';
 import { env } from './env.js';
 import { pingDb } from './db.js';
 import { openStream, send } from './sse.js';
@@ -78,19 +79,27 @@ app.post('/threads/:threadId/ask', async (req, res) => {
   const body = AskBody.safeParse(req.body);
   if (!body.success) return res.status(400).json({ error: body.error.message, status: 400 });
 
+  const startedAt = Date.now();
   openStream(res);
-  const { terminated } = await runQuickLoop(body.data.query, res);
-  send(res, 'done', {
-    answerId: 'ans_stub',
-    latencyMs: 0,
-    ttftMs: 0,
-    model: env.llmModel,
-    tokens: { in: 0, out: 0 },
-    costUsd: 0,
-    searchCached: false,
-    terminated,
-    depth: 'quick'
-  });
+  try {
+    const run = await runQuickLoop(body.data.query, res, startedAt);
+    const dangling = unresolvedCitations(run.text, run.sources);
+    if (dangling.length) log.warn({ dangling }, 'answer cites numbers that are not in sources');
+    send(res, 'done', {
+      answerId: newId('ans'),
+      latencyMs: Date.now() - startedAt,
+      ttftMs: run.ttftMs,
+      model: env.llmModel,
+      tokens: run.tokens,
+      costUsd: costUsd(run.tokens, run.searchCalls),
+      searchCached: false,
+      terminated: run.terminated,
+      depth: 'quick'
+    });
+  } catch (e) {
+    log.error({ err: e }, 'ask failed');
+    send(res, 'error', { status: 502, error: e instanceof Error ? e.message : String(e) });
+  }
   res.end();
 });
 
