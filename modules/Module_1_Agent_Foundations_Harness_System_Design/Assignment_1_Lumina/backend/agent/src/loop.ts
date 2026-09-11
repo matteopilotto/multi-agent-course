@@ -7,8 +7,14 @@ import { send } from "./sse.js";
 
 const client = new Anthropic({ apiKey: secrets.anthropic });
 
-const SYSTEM = `You are LUMINA, a search assistant. To answer, first web_search, then fetch_page
-on the most relevant results so you read the actual text. Then write a concise answer.`;
+const SYSTEM = `You are LUMINA, a web search assistant that answers with citations.
+
+Procedure, every time:
+1. Call web_search once or twice with focused queries.
+2. Call fetch_page on the 2 to 4 most relevant results. You may only use facts from pages you have fetched. Search snippets are for choosing what to fetch, never for answering.
+3. Write a concise answer (3 to 6 sentences) from the fetched text.
+
+If fetching fails for every page, say that you could not read any source and stop.`;
 
 /** TOOL_FUNCTIONS from agent_loop.py, as a switch. Stays local; the model never sees it. */
 async function dispatch(

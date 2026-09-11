@@ -39,10 +39,11 @@
 import express from 'express';
 import pino from 'pino';
 import { mkdirSync } from 'node:fs';
-import { HealthResponse, ROUTES } from '@lumina/contract';
+import { AskBody, HealthResponse, ROUTES } from '@lumina/contract';
 import { env } from './env.js';
 import { pingDb } from './db.js';
-import { openStream, send, sleep } from './sse.js';
+import { openStream, send } from './sse.js';
+import { runQuickLoop } from './loop.js';
 
 const log = pino({ level: env.logLevel });
 const app = express();
@@ -73,15 +74,16 @@ app.get('/health', async (_req, res) => {
 
 // ---------------------------------------------------------------- POST /threads/:threadId/ask
 
-app.post('/threads/:threadId/ask', async (_req, res) => {
+app.post('/threads/:threadId/ask', async (req, res) => {
+  const body = AskBody.safeParse(req.body);
+  if (!body.success) return res.status(400).json({ error: body.error.message, status: 400 });
+
   openStream(res);
-  send(res, 'trace', { step: 1, tool: 'web_search', input: { query: 'stub' }, ok: true, ms: 12, reason: 'fake step' });
+  const answer = await runQuickLoop(body.data.query, res);
   send(res, 'sources', []);
-  send(res, 'token', { text: 'Hello ' });
-  await sleep(1000); // if streaming works you SEE the pause between the two tokens
-  send(res, 'token', { text: 'world.' });
+  send(res, 'token', { text: answer });
   send(res, 'done', {
-    answerId: 'ans_stub', latencyMs: 1000, ttftMs: 5, model: env.llmModel,
+    answerId: 'ans_stub', latencyMs: 0, ttftMs: 0, model: env.llmModel,
     tokens: { in: 0, out: 0 }, costUsd: 0, searchCached: false, terminated: 'done', depth: 'quick'
   });
   res.end();
