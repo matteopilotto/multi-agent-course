@@ -14,8 +14,7 @@ export const env = {
   mongoUri: process.env.MONGODB_URI ?? '',
   mongoDb: process.env.MONGODB_DB ?? 'lumina',
   vectorBackend: (process.env.VECTOR_BACKEND ?? 'atlas-vector-search') as
-    | 'atlas-vector-search'
-    | 'mongo-cosine-scan',
+    'atlas-vector-search' | 'mongo-cosine-scan',
 
   llmProvider: process.env.LLM_PROVIDER ?? 'anthropic',
   llmModel: process.env.LLM_MODEL ?? 'claude-sonnet-5',

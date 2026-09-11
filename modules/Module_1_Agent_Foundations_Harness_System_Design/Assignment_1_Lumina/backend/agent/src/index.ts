@@ -81,8 +81,15 @@ app.post('/threads/:threadId/ask', async (req, res) => {
   openStream(res);
   const { terminated } = await runQuickLoop(body.data.query, res);
   send(res, 'done', {
-    answerId: 'ans_stub', latencyMs: 0, ttftMs: 0, model: env.llmModel,
-    tokens: { in: 0, out: 0 }, costUsd: 0, searchCached: false, terminated, depth: 'quick'
+    answerId: 'ans_stub',
+    latencyMs: 0,
+    ttftMs: 0,
+    model: env.llmModel,
+    tokens: { in: 0, out: 0 },
+    costUsd: 0,
+    searchCached: false,
+    terminated,
+    depth: 'quick'
   });
   res.end();
 });
@@ -90,11 +97,18 @@ app.post('/threads/:threadId/ask', async (req, res) => {
 // ---------------------------------------------------------------- everything else: 501
 
 const notImplemented = (route: string) => (_req: express.Request, res: express.Response) => {
-  res.status(501).json({ error: `not implemented yet: ${route}. Build it in backend/agent/src/.`, status: 501 });
+  res
+    .status(501)
+    .json({ error: `not implemented yet: ${route}. Build it in backend/agent/src/.`, status: 501 });
 };
 
 for (const route of ROUTES) {
-  if (route.path === '/health' || route.path === '/evals/report.json' || route.path === '/threads/:threadId/ask') continue;
+  if (
+    route.path === '/health' ||
+    route.path === '/evals/report.json' ||
+    route.path === '/threads/:threadId/ask'
+  )
+    continue;
   const method = route.method.toLowerCase() as 'get' | 'post' | 'delete';
   app[method](route.path, notImplemented(`${route.method} ${route.path}`));
 }
@@ -115,7 +129,11 @@ app.listen(env.port, () => {
       vectorStore: env.vectorBackend,
       caps: {
         quick: { toolCalls: env.maxToolCalls, wallClockSec: env.maxWallClockSec },
-        deep: { toolCalls: env.maxToolCallsDeep, wallClockSec: env.maxWallClockSecDeep, dailyCap: env.deepDailyCap }
+        deep: {
+          toolCalls: env.maxToolCallsDeep,
+          wallClockSec: env.maxWallClockSecDeep,
+          dailyCap: env.deepDailyCap
+        }
       }
     },
     'agent up — every route but /health returns 501 until you build it'
