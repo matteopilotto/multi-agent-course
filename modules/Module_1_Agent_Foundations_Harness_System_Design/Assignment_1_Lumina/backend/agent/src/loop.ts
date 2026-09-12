@@ -1,11 +1,12 @@
 import Anthropic from '@anthropic-ai/sdk';
 import type { Response } from 'express';
-import type { RunLog, Source, Terminated, TraceEvent } from '@lumina/contract';
+import type { RunLog, Source, Terminated, ThreadMessage, TraceEvent } from '@lumina/contract';
 import { env, secrets } from './env.js';
 import { TOOL_SCHEMAS, fetchPage, ProviderError } from './tools.js';
 import { cachedWebSearch } from './cache.js';
 import { send } from './sse.js';
 import pino from 'pino';
+
 const log = pino({ level: env.logLevel });
 
 const client = new Anthropic({ apiKey: secrets.anthropic });
@@ -15,18 +16,38 @@ Your only job is to gather sources. Do not write an answer.
 
 Search results for the question are already in the first message.
 1. Call fetch_page on the 2 to 4 most relevant results. Only fetched pages can be cited later.
-2. Call web_search again only if those results clearly do not cover the question.
+2. Call web_search again only if those results clearly do not cover the question, or if the question is a follow-up whose meaning depends on the earlier turns (then search with the full topic spelled out).
 3. When you have read enough, reply with the single word READY.`;
 
 const ANSWER_SYSTEM = `You are LUMINA, a web search assistant that answers with citations.
 Write a concise answer (3 to 6 sentences) using ONLY the numbered sources below.
 Cite with [n] right after each claim, where n is a listed source number. Never cite a number that is not listed.
+Earlier turns of the conversation may precede the question. Use them to understand what the question refers to, but the citation numbers in earlier answers point at sources that are no longer listed: never reuse them.
 If the sources do not cover the question, say so plainly and cite nothing.`;
 
 const CAP_NOTE =
   'Tool budget exhausted. Answer now with what you have, and say plainly what you could not verify.';
 
 type Page = { url: string; title: string; text: string };
+
+/** Earlier turns, bounded: a long thread must not eat the token budget. */
+const HISTORY_MAX_TURNS = 6;
+const HISTORY_MAX_CHARS = 1500;
+
+/** The thread as real model turns, for the answer phase. */
+function historyMessages(history: ThreadMessage[]): Anthropic.MessageParam[] {
+  const recent = history.slice(-HISTORY_MAX_TURNS);
+  while (recent[0]?.role === 'assistant') recent.shift(); // the API wants the first turn to be the user's
+  return recent.map((m) => ({ role: m.role, content: m.content.slice(0, HISTORY_MAX_CHARS) }));
+}
+
+/** The thread as a short text block, for the research phase, which only needs to know what "it" means. */
+function historyText(history: ThreadMessage[]): string {
+  return history
+    .slice(-HISTORY_MAX_TURNS)
+    .map((m) => `${m.role}: ${m.content.slice(0, 400)}`)
+    .join('\n');
+}
 
 /** Owned by the route, filled by the loop, so it survives a throw. */
 export type RunState = {
@@ -76,7 +97,8 @@ export async function runQuickLoop(
   query: string,
   res: Response,
   startedAt: number,
-  state: RunState
+  state: RunState,
+  history: ThreadMessage[] = []
 ): Promise<LoopResult> {
   const { toolCalls, tokens, searchHits } = state;
   const addUsage = (u: Anthropic.Usage) => {
@@ -164,10 +186,11 @@ export async function runQuickLoop(
   // "What is Tavily?" into "What is Tavily" is a hop paid for nothing. The model can still
   // search again if these results do not cover the question.
   const first = await callTool('web_search', { query }, 'harness pre-search: the question as typed');
+  const context = history.length ? `Earlier in this conversation:\n${historyText(history)}\n\n` : '';
   const messages: Anthropic.MessageParam[] = [
     {
       role: 'user',
-      content: `Question: ${query}\n\nSearch results for the question as typed:\n${first.output}`
+      content: `${context}Question: ${query}\n\nSearch results for the question as typed:\n${first.output}`
     }
   ];
 
@@ -185,7 +208,10 @@ export async function runQuickLoop(
       tools: TOOL_SCHEMAS,
       messages
     });
-    log.debug({ phase: 'research', ms: Date.now() - t0, inTokens: response.usage.input_tokens }, 'model call');
+    log.debug(
+      { phase: 'research', ms: Date.now() - t0, inTokens: response.usage.input_tokens },
+      'model call'
+    );
 
     addUsage(response.usage);
     messages.push({ role: 'assistant', content: response.content });
@@ -225,7 +251,7 @@ export async function runQuickLoop(
     model: env.llmModel,
     max_tokens: 1024,
     system: `${ANSWER_SYSTEM}\n\n${terminated === 'cap' ? `${CAP_NOTE}\n\n` : ''}SOURCES:\n${sourceBlock}`,
-    messages: [{ role: 'user', content: query }]
+    messages: [...historyMessages(history), { role: 'user', content: query }]
   });
   stream.on('text', (delta) => {
     if (!firstTokenAt) {

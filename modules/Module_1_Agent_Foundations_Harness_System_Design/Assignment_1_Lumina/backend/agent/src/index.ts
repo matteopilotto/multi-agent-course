@@ -142,13 +142,14 @@ app.post('/threads/:threadId/ask', async (req, res) => {
     toolCalls: state.toolCalls
   });
 
-  // The question is part of the thread even if the answer fails.
+  // Read the history BEFORE appending this turn, or the question shows up twice.
+  const history = await threadMessages(thread._id);
   await appendMessage({ threadId: thread._id, userId, role: 'user', content: query, sources: [] });
   await titleFromFirstQuery(thread._id, query);
 
   openStream(res);
   try {
-    const run = await runQuickLoop(query, res, startedAt, state);
+    const run = await runQuickLoop(query, res, startedAt, state, history);
     const dangling = unresolvedCitations(run.text, run.sources);
     if (dangling.length) log.warn({ requestId, dangling }, 'answer cites numbers that are not in sources');
     const cost = costUsd(state.tokens, run.searchCalls);
