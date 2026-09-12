@@ -14,9 +14,9 @@ const client = new Anthropic({ apiKey: secrets.anthropic });
 const RESEARCH_SYSTEM = `You are the research phase of LUMINA, a web search assistant.
 Your only job is to gather sources. Do not write an answer.
 
-Search results for the question are already in the first message.
+Search results for the question may already be in the first message. If they are not, start with web_search.
 1. Call fetch_page on the 2 to 4 most relevant results. Only fetched pages can be cited later.
-2. Call web_search again only if those results clearly do not cover the question, or if the question is a follow-up whose meaning depends on the earlier turns (then search with the full topic spelled out).
+2. Call web_search again only if those results clearly do not cover the question.
 3. When you have read enough, reply with the single word READY.`;
 
 const ANSWER_SYSTEM = `You are LUMINA, a web search assistant that answers with citations.
@@ -152,6 +152,7 @@ export async function runQuickLoop(
     reason?: string
   ): Promise<{ output: string; error?: string }> {
     step += 1;
+    const thisStep = step; // captured now: parallel fetches would otherwise all report the last number
     const t0 = Date.now();
     let output: string;
     let error: string | undefined;
@@ -169,7 +170,7 @@ export async function runQuickLoop(
     const ms = Date.now() - t0;
     const why = [reason, note].filter(Boolean).join('; ');
     send(res, 'trace', {
-      step,
+      step: thisStep,
       tool: name,
       input,
       ok: !error,
@@ -182,17 +183,18 @@ export async function runQuickLoop(
     return { output, error };
   }
 
-  // ---- phase 0: the harness searches the question as typed. A model turn that rewrites
-  // "What is Tavily?" into "What is Tavily" is a hop paid for nothing. The model can still
-  // search again if these results do not cover the question.
-  const first = await callTool('web_search', { query }, 'harness pre-search: the question as typed');
-  const context = history.length ? `Earlier in this conversation:\n${historyText(history)}\n\n` : '';
-  const messages: Anthropic.MessageParam[] = [
-    {
-      role: 'user',
-      content: `${context}Question: ${query}\n\nSearch results for the question as typed:\n${first.output}`
-    }
-  ];
+  // ---- phase 0: on a fresh question the harness searches the words as typed, because a model
+  // turn that rewrites "What is Tavily?" into "What is Tavily" is a hop paid for nothing. On a
+  // follow-up the words as typed ("and how much does it cost?") are not a query, so the model
+  // makes the first search with the thread in view instead.
+  let opening: string;
+  if (history.length) {
+    opening = `Earlier in this conversation:\n${historyText(history)}\n\nQuestion: ${query}\n\nThis is a follow-up. Search for it with the full topic spelled out.`;
+  } else {
+    const first = await callTool('web_search', { query }, 'harness pre-search: the question as typed');
+    opening = `Question: ${query}\n\nSearch results for the question as typed:\n${first.output}`;
+  }
+  const messages: Anthropic.MessageParam[] = [{ role: 'user', content: opening }];
 
   // ---- phase 1: research. Tools on. Nothing streams but the trace.
   while (true) {
