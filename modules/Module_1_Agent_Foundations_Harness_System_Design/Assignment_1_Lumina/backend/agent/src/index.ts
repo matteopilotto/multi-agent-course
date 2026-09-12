@@ -155,6 +155,8 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
 });
 
 app.listen(env.port, () => {
+  // Open the Mongo client now, not on the first ask: the handshake took 1.6 s inside a request's ttft window.
+  void pingDb().then((status) => log.info({ db: status }, 'mongo connection warmed'));
   log.info(
     {
       port: env.port,
