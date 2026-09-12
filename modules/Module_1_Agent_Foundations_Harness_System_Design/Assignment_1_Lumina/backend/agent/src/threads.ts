@@ -1,5 +1,6 @@
 import { COLLECTIONS, newId, type MessageDoc, type ThreadDoc, type ThreadMessage } from '@lumina/contract';
 import { db } from './db.js';
+import { randomUUID } from 'node:crypto';
 
 const threads = async () => (await db()).collection<ThreadDoc>(COLLECTIONS.threads);
 const messages = async () => (await db()).collection<MessageDoc>(COLLECTIONS.messages);
@@ -41,4 +42,15 @@ export async function threadMessages(threadId: string): Promise<ThreadMessage[]>
     done: m.done,
     createdAt: new Date(m.createdAt).toISOString()
   }));
+}
+
+/** The UI lists threads by title, so the first question becomes the title. */
+export async function titleFromFirstQuery(threadId: string, query: string): Promise<void> {
+  await (
+    await threads()
+  ).updateOne({ _id: threadId, title: 'New thread' }, { $set: { title: query.slice(0, 80) } });
+}
+
+export async function appendMessage(doc: Omit<MessageDoc, '_id' | 'createdAt'>): Promise<void> {
+  await (await messages()).insertOne({ _id: randomUUID(), ...doc, createdAt: new Date() });
 }

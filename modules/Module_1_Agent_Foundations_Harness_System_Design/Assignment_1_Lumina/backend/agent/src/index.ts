@@ -47,9 +47,17 @@ import {
   ROUTES,
   USER_HEADER,
   newId,
-  unresolvedCitations
+  unresolvedCitations,
+  DoneEvent
 } from '@lumina/contract';
-import { createThread, findThread, listThreads, threadMessages } from './threads.js';
+import {
+  createThread,
+  findThread,
+  listThreads,
+  threadMessages,
+  appendMessage,
+  titleFromFirstQuery
+} from './threads.js';
 import { costUsd } from './cost.js';
 import { env } from './env.js';
 import { pingDb } from './db.js';
@@ -115,12 +123,18 @@ app.get('/threads/:threadId', async (req, res) => {
 // ---------------------------------------------------------------- POST /threads/:threadId/ask
 
 app.post('/threads/:threadId/ask', async (req, res) => {
+  const userId = userIdOf(req);
+  if (!userId) return res.status(401).json({ error: `missing ${USER_HEADER}`, status: 401 });
   const body = AskBody.safeParse(req.body);
   if (!body.success) return res.status(400).json({ error: body.error.message, status: 400 });
+  // Before the stream opens: a status code can still carry the failure here, not after.
+  const thread = await findThread(userId, req.params.threadId);
+  if (!thread) return res.status(404).json({ error: `no thread ${req.params.threadId}`, status: 404 });
 
   const requestId = req.header(REQUEST_HEADER) ?? newId('req');
   const startedAt = Date.now();
   const state = newRunState();
+  const query = body.data.query;
   const logBase = () => ({
     tokens: state.tokens.in + state.tokens.out,
     wallClockSec: (Date.now() - startedAt) / 1000,
@@ -128,13 +142,17 @@ app.post('/threads/:threadId/ask', async (req, res) => {
     toolCalls: state.toolCalls
   });
 
+  // The question is part of the thread even if the answer fails.
+  await appendMessage({ threadId: thread._id, userId, role: 'user', content: query, sources: [] });
+  await titleFromFirstQuery(thread._id, query);
+
   openStream(res);
   try {
-    const run = await runQuickLoop(body.data.query, res, startedAt, state);
+    const run = await runQuickLoop(query, res, startedAt, state);
     const dangling = unresolvedCitations(run.text, run.sources);
     if (dangling.length) log.warn({ requestId, dangling }, 'answer cites numbers that are not in sources');
     const cost = costUsd(state.tokens, run.searchCalls);
-    send(res, 'done', {
+    const done: DoneEvent = {
       answerId: newId('ans'),
       latencyMs: Date.now() - startedAt,
       ttftMs: run.ttftMs,
@@ -144,8 +162,18 @@ app.post('/threads/:threadId/ask', async (req, res) => {
       searchCached: run.searchCached,
       terminated: run.terminated,
       depth: 'quick'
-    });
+    };
+    send(res, 'done', done);
     writeRunLog(requestId, { ...logBase(), costUsd: cost, terminated: run.terminated });
+    await appendMessage({
+      threadId: thread._id,
+      userId,
+      role: 'assistant',
+      content: run.text,
+      sources: run.sources,
+      answerId: done.answerId,
+      done
+    });
   } catch (e) {
     log.error({ requestId, err: e }, 'ask failed');
     send(res, 'error', { status: 502, error: e instanceof Error ? e.message : String(e) });
