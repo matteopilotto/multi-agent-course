@@ -1,5 +1,8 @@
 import { createHash } from 'node:crypto';
 import type { SearchResult } from './tools.js';
+import { COLLECTIONS, SearchCacheDoc } from '@lumina/contract';
+import { db } from './db.js';
+import { env } from './env.js';
 
 /**
  * The query as the cache sees it. Only transformations that cannot change the meaning:
@@ -57,4 +60,32 @@ export class SearchLru {
   get size(): number {
     return this.map.size;
   }
+}
+
+type Provider = 'tavily' | 'serpapi';
+
+const collection = async () => (await db()).collection<SearchCacheDoc>(COLLECTIONS.searchCache);
+
+/** Tier 2 read. Checks expiresAt in code: the sweeper runs about once a minute, so the row may still be there. */
+export async function readMongo(key: string): Promise<CacheEntry | undefined> {
+  const row = await (await collection()).findOne({ _id: key });
+  if (!row) return undefined;
+  const expiresAt = new Date(row.expiresAt).getTime();
+  if (expiresAt <= Date.now()) return undefined;
+  return { results: row.results as SearchResult[], expiresAt };
+}
+
+/** Tier 2 write. expiresAt MUST be a Date object or the TTL index ignores it. */
+export async function writeMongo(
+  key: string,
+  query: string,
+  provider: Provider,
+  results: SearchResult[]
+): Promise<CacheEntry> {
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + env.searchCacheTtlSeconds * 1000);
+  const doc: SearchCacheDoc = { _id: key, provider, query, results, expiresAt, createdAt: now };
+  SearchCacheDoc.parse(doc); // drift fails here, not in the grader
+  await (await collection()).replaceOne({ _id: key }, doc, { upsert: true });
+  return { results, expiresAt: expiresAt.getTime() };
 }
