@@ -94,16 +94,16 @@ export async function runQuickLoop(
   async function dispatch(
     name: string,
     input: Record<string, unknown>
-  ): Promise<{ output: string; cached?: boolean }> {
+  ): Promise<{ output: string; note?: string }> {
     switch (name) {
       case 'web_search': {
-        const { results, cached } = await cachedWebSearch(String(input.query));
+        const { results, cached, note } = await cachedWebSearch(String(input.query));
         searchHits.push(cached);
         for (const r of results) titles.set(r.url, r.title);
         const output = results
           .map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}\n   ${r.snippet.slice(0, 160)}`)
           .join('\n');
-        return { output, cached };
+        return { output, note }; // note: "search cache hit", "cache bypassed", or undefined on a plain miss
       }
 
       case 'fetch_page': {
@@ -134,18 +134,18 @@ export async function runQuickLoop(
     let output: string;
     let error: string | undefined;
     let fatal: ProviderError | undefined;
-    let cached = false;
+    let note: string | undefined;
     try {
       const r = await dispatch(name, input);
       output = r.output;
-      cached = r.cached ?? false;
+      note = r.note;
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
       output = `ERROR: ${error}`;
       if (e instanceof ProviderError) fatal = e;
     }
     const ms = Date.now() - t0;
-    const why = [reason, cached ? 'search cache hit' : undefined].filter(Boolean).join('; ');
+    const why = [reason, note].filter(Boolean).join('; ');
     send(res, 'trace', {
       step,
       tool: name,

@@ -93,23 +93,37 @@ export async function writeMongo(
 
 const lru = new SearchLru();
 
-export type CachedSearch = { results: SearchResult[]; cached: boolean };
+const THIS_YEAR = new Date().getFullYear();
+
+/** "today", "latest", or a year at or after this one: a six-hour-old result is the wrong answer. */
+export function isTimeSensitive(query: string): boolean {
+  const q = normalizeQuery(query);
+  if (/\b(today|latest|now|yesterday|this (week|month|year))\b/.test(q)) return true;
+  const years = q.match(/\b(19|20)\d{2}\b/g) ?? []; // like re.findall
+  return years.some((y) => Number(y) >= THIS_YEAR);
+}
+
+export type CachedSearch = { results: SearchResult[]; cached: boolean; note?: string };
 
 /** LRU, then Mongo, then the provider. Fills the tiers above whichever one answered. */
 export async function cachedWebSearch(query: string): Promise<CachedSearch> {
+  if (isTimeSensitive(query)) {
+    const results = await webSearch(query); // no read, no write: the row would never be served anyway
+    return { results, cached: false, note: 'time-sensitive query, cache bypassed' };
+  }
   const provider = env.searchProvider;
   const key = cacheKey(query, provider);
 
   const hot = lru.get(key);
-  if (hot) return { results: hot.results, cached: true };
+  if (hot) return { results: hot.results, cached: true, note: 'search cache hit' };
 
   const warm = await readMongo(key);
   if (warm) {
     lru.set(key, warm);
-    return { results: warm.results, cached: true };
+    return { results: warm.results, cached: true, note: 'search cache hit' };
   }
 
-  const results = await webSearch(query); // throws ProviderError on a providper failure; nothing here catches it
+  const results = await webSearch(query); // throws ProviderError on a provider failure; nothing here catches it
   const entry = await writeMongo(key, query, provider, results);
   lru.set(key, entry);
   return { results, cached: false };
