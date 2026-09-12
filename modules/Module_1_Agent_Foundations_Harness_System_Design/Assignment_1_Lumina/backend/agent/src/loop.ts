@@ -29,8 +29,16 @@ const CAP_NOTE =
 type Page = { url: string; title: string; text: string };
 
 /** Owned by the route, filled by the loop, so it survives a throw. */
-export type RunState = { toolCalls: RunLog['toolCalls']; tokens: { in: number; out: number } };
-export const newRunState = (): RunState => ({ toolCalls: [], tokens: { in: 0, out: 0 } });
+export type RunState = {
+  toolCalls: RunLog['toolCalls'];
+  tokens: { in: number; out: number };
+  /** One entry per successful web_search: true when a cache tier answered. Failures never push. */
+  searchHits: boolean[];
+};
+export const newRunState = (): RunState => ({ toolCalls: [], tokens: { in: 0, out: 0 }, searchHits: [] });
+
+/** Only misses reached the provider, so only misses are billed. */
+export const providerSearchCalls = (s: RunState) => s.searchHits.filter((hit) => !hit).length;
 
 export type LoopResult = {
   text: string;
@@ -38,6 +46,7 @@ export type LoopResult = {
   sources: Source[];
   searchCalls: number;
   ttftMs: number;
+  searchCached: boolean;
 };
 
 /** The paragraph of a fetched page most related to the query, verbatim, so the grounding check can find it. */
@@ -69,29 +78,32 @@ export async function runQuickLoop(
   startedAt: number,
   state: RunState
 ): Promise<LoopResult> {
-  const { toolCalls, tokens } = state;
+  const { toolCalls, tokens, searchHits } = state;
   const addUsage = (u: Anthropic.Usage) => {
     tokens.in += u.input_tokens;
     tokens.out += u.output_tokens;
   };
   let firstTokenAt = 0;
   const pages: Page[] = [];
-  const searchHits: boolean[] = [];
   const titles = new Map<string, string>();
   const deadline = Date.now() + env.maxWallClockSec * 1000;
   let step = 0;
   let terminated: Terminated = 'done';
 
   /** TOOL_FUNCTIONS from agent_loop.py. Lives inside the loop so it can record what was fetched. */
-  async function dispatch(name: string, input: Record<string, unknown>): Promise<string> {
+  async function dispatch(
+    name: string,
+    input: Record<string, unknown>
+  ): Promise<{ output: string; cached?: boolean }> {
     switch (name) {
       case 'web_search': {
         const { results, cached } = await cachedWebSearch(String(input.query));
         searchHits.push(cached);
         for (const r of results) titles.set(r.url, r.title);
-        return results
+        const output = results
           .map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}\n   ${r.snippet.slice(0, 160)}`)
           .join('\n');
+        return { output, cached };
       }
 
       case 'fetch_page': {
@@ -104,7 +116,7 @@ export async function runQuickLoop(
             text
           });
         }
-        return text;
+        return { output: text };
       }
       default:
         throw new Error(`unknown tool ${name}`);
@@ -122,21 +134,25 @@ export async function runQuickLoop(
     let output: string;
     let error: string | undefined;
     let fatal: ProviderError | undefined;
+    let cached = false;
     try {
-      output = await dispatch(name, input);
+      const r = await dispatch(name, input);
+      output = r.output;
+      cached = r.cached ?? false;
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
       output = `ERROR: ${error}`;
       if (e instanceof ProviderError) fatal = e;
     }
     const ms = Date.now() - t0;
+    const why = [reason, cached ? 'search cache hit' : undefined].filter(Boolean).join('; ');
     send(res, 'trace', {
       step,
       tool: name,
       input,
       ok: !error,
       ms,
-      ...(reason ? { reason } : {}),
+      ...(why ? { reason: why } : {}),
       ...(error ? { error } : {})
     });
     toolCalls.push({ name, ok: !error, ms, ...(error ? { error } : {}) });
@@ -224,8 +240,8 @@ export async function runQuickLoop(
     .filter((b) => b.type === 'text')
     .map((b) => b.text)
     .join('');
-  const searchCalls = toolCalls.filter((t) => t.name === 'web_search' && t.ok).length;
+  const searchCalls = providerSearchCalls(state);
+  const searchCached = searchHits.length > 0 && searchHits.every(Boolean); // every search was a hit, and there was at least one
   const ttftMs = (firstTokenAt || Date.now()) - startedAt;
-
-  return { text, terminated, sources, searchCalls, ttftMs };
+  return { text, terminated, sources, searchCalls, searchCached, ttftMs };
 }

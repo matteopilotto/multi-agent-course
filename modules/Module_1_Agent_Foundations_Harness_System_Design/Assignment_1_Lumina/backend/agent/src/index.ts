@@ -51,7 +51,7 @@ import { costUsd } from './cost.js';
 import { env } from './env.js';
 import { pingDb } from './db.js';
 import { openStream, send } from './sse.js';
-import { runQuickLoop, newRunState } from './loop.js';
+import { providerSearchCalls, runQuickLoop, newRunState } from './loop.js';
 import { writeRunLog } from './runlog.js';
 
 const log = pino({ level: env.logLevel });
@@ -110,7 +110,7 @@ app.post('/threads/:threadId/ask', async (req, res) => {
       model: env.llmModel,
       tokens: state.tokens,
       costUsd: cost,
-      searchCached: false,
+      searchCached: run.searchCached,
       terminated: run.terminated,
       depth: 'quick'
     });
@@ -118,7 +118,7 @@ app.post('/threads/:threadId/ask', async (req, res) => {
   } catch (e) {
     log.error({ requestId, err: e }, 'ask failed');
     send(res, 'error', { status: 502, error: e instanceof Error ? e.message : String(e) });
-    const searchCalls = state.toolCalls.filter((t) => t.name === 'web_search' && t.ok).length;
+    const searchCalls = providerSearchCalls(state);
     writeRunLog(requestId, {
       ...logBase(),
       costUsd: costUsd(state.tokens, searchCalls),
