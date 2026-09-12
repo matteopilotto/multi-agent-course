@@ -41,12 +41,15 @@ import pino from 'pino';
 import { mkdirSync } from 'node:fs';
 import {
   AskBody,
+  CreateThreadBody,
   HealthResponse,
   REQUEST_HEADER,
   ROUTES,
+  USER_HEADER,
   newId,
   unresolvedCitations
 } from '@lumina/contract';
+import { createThread } from './threads.js';
 import { costUsd } from './cost.js';
 import { env } from './env.js';
 import { pingDb } from './db.js';
@@ -79,6 +82,20 @@ app.get('/health', async (_req, res) => {
     ai: { status: 'ok' }
   };
   res.status(dbStatus === 'ok' ? 200 : 503).json(body);
+});
+
+// ---------------------------------------------------------------- POST /threads
+
+/** The gateway will reject a missing header before it gets here; the agent still refuses, because every row needs an owner. */
+const userIdOf = (req: express.Request): string | undefined => req.header(USER_HEADER)?.trim() || undefined;
+
+app.post('/threads', async (req, res) => {
+  const userId = userIdOf(req);
+  if (!userId) return res.status(401).json({ error: `missing ${USER_HEADER}`, status: 401 });
+  const body = CreateThreadBody.safeParse(req.body ?? {});
+  if (!body.success) return res.status(400).json({ error: body.error.message, status: 400 });
+  const threadId = await createThread(userId, body.data.title);
+  res.status(201).json({ threadId });
 });
 
 // ---------------------------------------------------------------- POST /threads/:threadId/ask
@@ -140,7 +157,8 @@ for (const route of ROUTES) {
   if (
     route.path === '/health' ||
     route.path === '/evals/report.json' ||
-    route.path === '/threads/:threadId/ask'
+    route.path === '/threads/:threadId/ask' ||
+    (route.path === '/threads' && route.method === 'POST')
   )
     continue;
   const method = route.method.toLowerCase() as 'get' | 'post' | 'delete';
