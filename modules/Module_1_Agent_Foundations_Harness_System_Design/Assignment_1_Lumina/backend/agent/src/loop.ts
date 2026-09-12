@@ -185,7 +185,7 @@ export async function runQuickLoop(
       tools: TOOL_SCHEMAS,
       messages
     });
-    log.info({ phase: 'research', ms: Date.now() - t0, inTokens: response.usage.input_tokens }, 'model call');
+    log.debug({ phase: 'research', ms: Date.now() - t0, inTokens: response.usage.input_tokens }, 'model call');
 
     addUsage(response.usage);
     messages.push({ role: 'assistant', content: response.content });
@@ -230,7 +230,7 @@ export async function runQuickLoop(
   stream.on('text', (delta) => {
     if (!firstTokenAt) {
       firstTokenAt = Date.now();
-      log.info({ phase: 'answer', msToFirstDelta: firstTokenAt - t1 }, 'model call');
+      log.debug({ phase: 'answer', msToFirstDelta: firstTokenAt - t1 }, 'model call');
     }
     send(res, 'token', { text: delta });
   });
