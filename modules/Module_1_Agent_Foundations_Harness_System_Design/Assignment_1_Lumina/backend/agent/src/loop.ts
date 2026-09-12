@@ -2,7 +2,8 @@ import Anthropic from '@anthropic-ai/sdk';
 import type { Response } from 'express';
 import type { RunLog, Source, Terminated, TraceEvent } from '@lumina/contract';
 import { env, secrets } from './env.js';
-import { TOOL_SCHEMAS, webSearch, fetchPage, ProviderError } from './tools.js';
+import { TOOL_SCHEMAS, fetchPage, ProviderError } from './tools.js';
+import { cachedWebSearch } from './cache.js';
 import { send } from './sse.js';
 import pino from 'pino';
 const log = pino({ level: env.logLevel });
@@ -75,6 +76,7 @@ export async function runQuickLoop(
   };
   let firstTokenAt = 0;
   const pages: Page[] = [];
+  const searchHits: boolean[] = [];
   const titles = new Map<string, string>();
   const deadline = Date.now() + env.maxWallClockSec * 1000;
   let step = 0;
@@ -84,7 +86,8 @@ export async function runQuickLoop(
   async function dispatch(name: string, input: Record<string, unknown>): Promise<string> {
     switch (name) {
       case 'web_search': {
-        const results = await webSearch(String(input.query));
+        const { results, cached } = await cachedWebSearch(String(input.query));
+        searchHits.push(cached);
         for (const r of results) titles.set(r.url, r.title);
         return results
           .map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}\n   ${r.snippet.slice(0, 160)}`)

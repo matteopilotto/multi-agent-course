@@ -3,6 +3,7 @@ import type { SearchResult } from './tools.js';
 import { COLLECTIONS, SearchCacheDoc } from '@lumina/contract';
 import { db } from './db.js';
 import { env } from './env.js';
+import { webSearch } from './tools.js';
 
 /**
  * The query as the cache sees it. Only transformations that cannot change the meaning:
@@ -88,4 +89,28 @@ export async function writeMongo(
   SearchCacheDoc.parse(doc); // drift fails here, not in the grader
   await (await collection()).replaceOne({ _id: key }, doc, { upsert: true });
   return { results, expiresAt: expiresAt.getTime() };
+}
+
+const lru = new SearchLru();
+
+export type CachedSearch = { results: SearchResult[]; cached: boolean };
+
+/** LRU, then Mongo, then the provider. Fills the tiers above whichever one answered. */
+export async function cachedWebSearch(query: string): Promise<CachedSearch> {
+  const provider = env.searchProvider;
+  const key = cacheKey(query, provider);
+
+  const hot = lru.get(key);
+  if (hot) return { results: hot.results, cached: true };
+
+  const warm = await readMongo(key);
+  if (warm) {
+    lru.set(key, warm);
+    return { results: warm.results, cached: true };
+  }
+
+  const results = await webSearch(query); // throws ProviderError on a providper failure; nothing here catches it
+  const entry = await writeMongo(key, query, provider, results);
+  lru.set(key, entry);
+  return { results, cached: false };
 }
