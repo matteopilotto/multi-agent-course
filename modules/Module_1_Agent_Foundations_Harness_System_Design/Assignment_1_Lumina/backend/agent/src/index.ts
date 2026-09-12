@@ -49,7 +49,7 @@ import {
   newId,
   unresolvedCitations
 } from '@lumina/contract';
-import { createThread } from './threads.js';
+import { createThread, findThread, listThreads, threadMessages } from './threads.js';
 import { costUsd } from './cost.js';
 import { env } from './env.js';
 import { pingDb } from './db.js';
@@ -96,6 +96,20 @@ app.post('/threads', async (req, res) => {
   if (!body.success) return res.status(400).json({ error: body.error.message, status: 400 });
   const threadId = await createThread(userId, body.data.title);
   res.status(201).json({ threadId });
+});
+
+app.get('/threads', async (req, res) => {
+  const userId = userIdOf(req);
+  if (!userId) return res.status(401).json({ error: `missing ${USER_HEADER}`, status: 401 });
+  res.json({ threads: await listThreads(userId) });
+});
+
+app.get('/threads/:threadId', async (req, res) => {
+  const userId = userIdOf(req);
+  if (!userId) return res.status(401).json({ error: `missing ${USER_HEADER}`, status: 401 });
+  const thread = await findThread(userId, req.params.threadId);
+  if (!thread) return res.status(404).json({ error: `no thread ${req.params.threadId}`, status: 404 });
+  res.json({ threadId: thread._id, title: thread.title, messages: await threadMessages(thread._id) });
 });
 
 // ---------------------------------------------------------------- POST /threads/:threadId/ask
@@ -154,12 +168,7 @@ const notImplemented = (route: string) => (_req: express.Request, res: express.R
 };
 
 for (const route of ROUTES) {
-  if (
-    route.path === '/health' ||
-    route.path === '/evals/report.json' ||
-    route.path === '/threads/:threadId/ask' ||
-    (route.path === '/threads' && route.method === 'POST')
-  )
+  if (route.path === '/health' || route.path === '/evals/report.json' || route.path.startsWith('/threads'))
     continue;
   const method = route.method.toLowerCase() as 'get' | 'post' | 'delete';
   app[method](route.path, notImplemented(`${route.method} ${route.path}`));
