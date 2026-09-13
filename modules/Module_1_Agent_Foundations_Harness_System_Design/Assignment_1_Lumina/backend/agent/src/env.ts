@@ -39,6 +39,7 @@ export const env = {
   maxWallClockSecDeep: num(process.env.MAX_WALL_CLOCK_SEC_DEEP, 240),
 
   logLevel: process.env.LOG_LEVEL ?? 'info',
+  nodeEnv: process.env.NODE_ENV ?? 'development',
   /** Where the per-answer run logs land. quality/check.mjs reads this folder. */
   runsDir: resolve(process.cwd(), '../../runs')
 } as const;

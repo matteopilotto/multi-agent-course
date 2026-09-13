@@ -49,7 +49,10 @@ import {
   newId,
   unresolvedCitations,
   DoneEvent,
-  ListMemoryResponse
+  ListMemoryResponse,
+  type RequestDoc,
+  type RunDoc,
+  type Terminated
 } from '@lumina/contract';
 import {
   createThread,
@@ -64,7 +67,7 @@ import { env } from './env.js';
 import { pingDb } from './db.js';
 import { openStream, send } from './sse.js';
 import { providerSearchCalls, runQuickLoop, newRunState } from './loop.js';
-import { writeRunLog } from './runlog.js';
+import { recordRequest, recordRun } from './runlog.js';
 import { listMemories, deleteMemory } from './memory.js';
 
 const log = pino({ level: env.logLevel });
@@ -144,6 +147,46 @@ app.post('/threads/:threadId/ask', async (req, res) => {
     toolCalls: state.toolCalls
   });
 
+  const route = 'POST /threads/:threadId/ask';
+  /**
+   * The evidence: a runs row (plus the local file) and a requests row. Written after the
+   * response is committed, so a failure here is logged and never thrown: the status code
+   * has already left the building.
+   */
+  const record = async (terminated: Terminated, cost: number, status: number, answerId?: string) => {
+    const createdAt = new Date();
+    const run: RunDoc = {
+      ...logBase(),
+      costUsd: cost,
+      terminated,
+      requestId,
+      userId,
+      threadId: thread._id,
+      query,
+      ...(answerId ? { answerId } : {}),
+      createdAt
+    };
+    const request: RequestDoc = {
+      requestId,
+      userId,
+      route,
+      status,
+      ms: Date.now() - startedAt,
+      tokensIn: state.tokens.in,
+      tokensOut: state.tokens.out,
+      costUsd: cost,
+      toolCalls: state.toolCalls.length,
+      terminated,
+      depth: 'quick',
+      createdAt
+    };
+    try {
+      await Promise.all([recordRun(run), recordRequest(request)]);
+    } catch (err) {
+      log.error({ requestId, err }, 'evidence write failed: runs/requests rows missing for this answer');
+    }
+  };
+
   // Read the history BEFORE appending this turn, or the question shows up twice.
   const history = await threadMessages(thread._id);
   await appendMessage({ threadId: thread._id, userId, role: 'user', content: query, sources: [] });
@@ -167,25 +210,35 @@ app.post('/threads/:threadId/ask', async (req, res) => {
       depth: 'quick'
     };
     send(res, 'done', done);
-    writeRunLog(requestId, { ...logBase(), costUsd: cost, terminated: run.terminated });
-    await appendMessage({
-      threadId: thread._id,
-      userId,
-      role: 'assistant',
-      content: run.text,
-      sources: run.sources,
-      answerId: done.answerId,
-      done
-    });
+    log.info(
+      {
+        requestId,
+        toolCalls: state.toolCalls.length,
+        terminated: run.terminated,
+        tokens: state.tokens,
+        costUsd: cost,
+        searchCached: run.searchCached,
+        ttftMs: run.ttftMs,
+        latencyMs: done.latencyMs
+      },
+      'answer'
+    );
+    await record(run.terminated, cost, 200, done.answerId);
   } catch (e) {
-    log.error({ requestId, err: e }, 'ask failed');
+    const cost = costUsd(state.tokens, providerSearchCalls(state));
+    log.error(
+      {
+        requestId,
+        err: e,
+        toolCalls: state.toolCalls.length,
+        terminated: 'error',
+        tokens: state.tokens,
+        costUsd: cost
+      },
+      'ask failed'
+    );
     send(res, 'error', { status: 502, error: e instanceof Error ? e.message : String(e) });
-    const searchCalls = providerSearchCalls(state);
-    writeRunLog(requestId, {
-      ...logBase(),
-      costUsd: costUsd(state.tokens, searchCalls),
-      terminated: 'error'
-    });
+    await record('error', cost, 502);
   }
   res.end();
 });
