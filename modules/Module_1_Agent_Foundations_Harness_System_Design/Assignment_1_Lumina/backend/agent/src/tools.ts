@@ -74,5 +74,17 @@ export const TOOL_SCHEMAS = [
       },
       required: ['url']
     }
+  },
+  {
+    name: 'save_memory',
+    description:
+      'Remember one durable fact or preference the user stated about themselves (what they build in, how they want answers, their role). One sentence, in the third person. Never save trivia from search results, and never save something already listed under what you know about the user.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        text: { type: 'string', description: 'The fact or preference, one sentence' }
+      },
+      required: ['text']
+    }
   }
 ];

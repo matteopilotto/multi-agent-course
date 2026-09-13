@@ -6,6 +6,7 @@ import { TOOL_SCHEMAS, fetchPage, ProviderError } from './tools.js';
 import { cachedWebSearch } from './cache.js';
 import { send } from './sse.js';
 import pino from 'pino';
+import { recallMemory, saveMemory, type Recalled } from './memory.js';
 
 const log = pino({ level: env.logLevel });
 
@@ -17,13 +18,15 @@ Your only job is to gather sources. Do not write an answer.
 Search results for the question may already be in the first message. If they are not, start with web_search.
 1. Call fetch_page on the 2 to 4 most relevant results. Only fetched pages can be cited later.
 2. Call web_search again only if those results clearly do not cover the question.
-3. When you have read enough, reply with the single word READY.`;
+3. When you have read enough, reply with the single word READY.
+4. If the user states a durable fact or preference about themselves, call save_memory with it once. If the user's message is only such a statement, save it and reply READY.`;
 
 const ANSWER_SYSTEM = `You are LUMINA, a web search assistant that answers with citations.
 Write a concise answer (3 to 6 sentences) using ONLY the numbered sources below.
 Cite with [n] right after each claim, where n is a listed source number. Never cite a number that is not listed.
 Earlier turns of the conversation may precede the question. Use them to understand what the question refers to, but the citation numbers in earlier answers point at sources that are no longer listed: never reuse them.
-If the sources do not cover the question, say so plainly and cite nothing.`;
+If the sources do not cover the question, say so plainly and cite nothing.
+If you know things about the user, let their preferences shape the answer (for example, code first when they prefer code). If the user only told you something about themselves rather than asking, confirm in one sentence what you will remember and cite nothing.`;
 
 const CAP_NOTE =
   'Tool budget exhausted. Answer now with what you have, and say plainly what you could not verify.';
@@ -33,6 +36,22 @@ type Page = { url: string; title: string; text: string };
 /** Earlier turns, bounded: a long thread must not eat the token budget. */
 const HISTORY_MAX_TURNS = 6;
 const HISTORY_MAX_CHARS = 1500;
+
+/** Injected memory is capped, so a chatty user cannot crowd out the sources. */
+const MEMORY_MAX_ROWS = 10;
+const MEMORY_MAX_CHARS = 4000;
+
+function memoryBlock(recalled: Recalled[]): string {
+  if (!recalled.length) return '';
+  const lines: string[] = [];
+  let chars = 0;
+  for (const m of recalled) {
+    if (chars + m.text.length > MEMORY_MAX_CHARS) break;
+    lines.push(`- ${m.text}`);
+    chars += m.text.length;
+  }
+  return `WHAT YOU KNOW ABOUT THIS USER (long-term memory):\n${lines.join('\n')}`;
+}
 
 /** The thread as real model turns, for the answer phase. */
 function historyMessages(history: ThreadMessage[]): Anthropic.MessageParam[] {
@@ -93,11 +112,14 @@ function pickSnippet(text: string, query: string): string {
   return best.slice(0, 300);
 }
 
+export type RunContext = { userId: string; threadId: string };
+
 export async function runQuickLoop(
   query: string,
   res: Response,
   startedAt: number,
   state: RunState,
+  ctx: RunContext,
   history: ThreadMessage[] = []
 ): Promise<LoopResult> {
   const { toolCalls, tokens, searchHits } = state;
@@ -108,6 +130,7 @@ export async function runQuickLoop(
   let firstTokenAt = 0;
   const pages: Page[] = [];
   const titles = new Map<string, string>();
+  const recalled: Recalled[] = [];
   const deadline = Date.now() + env.maxWallClockSec * 1000;
   let step = 0;
   let terminated: Terminated = 'done';
@@ -140,6 +163,21 @@ export async function runQuickLoop(
         }
         return { output: text };
       }
+
+      case 'recall_memory': {
+        const hits = await recallMemory(ctx.userId, String(input.query), MEMORY_MAX_ROWS);
+        recalled.push(...hits);
+        const output = hits.length
+          ? hits.map((m, i) => `${i + 1}. ${m.text}`).join('\n')
+          : '(no memories yet)';
+        return { output, note: `${hits.length} recalled` };
+      }
+
+      case 'save_memory': {
+        const id = await saveMemory(ctx.userId, String(input.text).trim(), ctx.threadId);
+        return { output: `saved ${id}` };
+      }
+
       default:
         throw new Error(`unknown tool ${name}`);
     }
@@ -183,17 +221,24 @@ export async function runQuickLoop(
     return { output, error };
   }
 
-  // ---- phase 0: on a fresh question the harness searches the words as typed, because a model
-  // turn that rewrites "What is Tavily?" into "What is Tavily" is a hop paid for nothing. On a
-  // follow-up the words as typed ("and how much does it cost?") are not a query, so the model
-  // makes the first search with the thread in view instead.
+  // ---- phase 0: recall always runs here, as a harness step, because a model that forgets to
+  // recall is a memory feature that silently does not exist. On a fresh question it runs in
+  // parallel with the pre-search (see below); on a follow-up it runs alone, and the model makes
+  // the first search with the thread in view.
+  const recall = callTool('recall_memory', { query }, 'harness: what is known about this user');
   let opening: string;
   if (history.length) {
+    await recall;
     opening = `Earlier in this conversation:\n${historyText(history)}\n\nQuestion: ${query}\n\nThis is a follow-up. Search for it with the full topic spelled out.`;
   } else {
-    const first = await callTool('web_search', { query }, 'harness pre-search: the question as typed');
+    const [first] = await Promise.all([
+      callTool('web_search', { query }, 'harness pre-search: the question as typed'),
+      recall
+    ]);
     opening = `Question: ${query}\n\nSearch results for the question as typed:\n${first.output}`;
   }
+  const known = memoryBlock(recalled);
+  if (known) opening = `${known}\n\n${opening}`;
   const messages: Anthropic.MessageParam[] = [{ role: 'user', content: opening }];
 
   // ---- phase 1: research. Tools on. Nothing streams but the trace.
@@ -252,7 +297,9 @@ export async function runQuickLoop(
   const stream = client.messages.stream({
     model: env.llmModel,
     max_tokens: 1024,
-    system: `${ANSWER_SYSTEM}\n\n${terminated === 'cap' ? `${CAP_NOTE}\n\n` : ''}SOURCES:\n${sourceBlock}`,
+    system: [ANSWER_SYSTEM, terminated === 'cap' ? CAP_NOTE : '', known, `SOURCES:\n${sourceBlock}`]
+      .filter(Boolean)
+      .join('\n\n'),
     messages: [...historyMessages(history), { role: 'user', content: query }]
   });
   stream.on('text', (delta) => {

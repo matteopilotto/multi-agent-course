@@ -151,7 +151,7 @@ app.post('/threads/:threadId/ask', async (req, res) => {
 
   openStream(res);
   try {
-    const run = await runQuickLoop(query, res, startedAt, state, history);
+    const run = await runQuickLoop(query, res, startedAt, state, { userId, threadId: thread._id }, history);
     const dangling = unresolvedCitations(run.text, run.sources);
     if (dangling.length) log.warn({ requestId, dangling }, 'answer cites numbers that are not in sources');
     const cost = costUsd(state.tokens, run.searchCalls);
