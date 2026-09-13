@@ -6,12 +6,14 @@
 import { hostname } from 'node:os';
 import { setTimeout as sleep } from 'node:timers/promises';
 import pino from 'pino';
-import type { JobDoc } from '@lumina/contract';
+import type { ChunkDoc, JobDoc } from '@lumina/contract';
 import { env } from './env.js';
 import { pingDb } from './db.js';
 import { claimJob, completeJob, failJob, sweepStaleJobs } from './jobs.js';
 import { findDocument, readUpload, setDocumentStatus } from './documents.js';
 import { parseDocument } from './ingest.js';
+import { embedMany } from './embed.js';
+import { deleteChunksOf, insertChunks } from './chunks.js';
 
 const log = pino({ level: env.logLevel });
 const workerId = `${hostname()}:${process.pid}`;
@@ -25,18 +27,48 @@ async function handle(job: JobDoc): Promise<void> {
 
   await setDocumentStatus(docId, { status: 'parsing', pct: 5 });
   const parsed = await parseDocument(await readUpload(doc.fileId), doc.mimeType);
-  log.info(
-    {
-      docId,
-      title: doc.title,
-      pages: parsed.pages,
-      pieces: parsed.pieces.length,
-      locators: parsed.pieces.slice(0, 4).map((p) => p.locator),
-      sample: parsed.pieces[0]?.text.slice(0, 80)
-    },
-    'parsed'
-  );
-  throw new Error('embedding not implemented yet');
+  log.info({ docId, title: doc.title, pages: parsed.pages, pieces: parsed.pieces.length }, 'parsed');
+  if (parsed.pieces.length === 0) throw new Error('no text extracted (scanned PDF or empty file)');
+
+  await setDocumentStatus(docId, {
+    status: 'embedding',
+    pct: 10,
+    ...(parsed.pages !== undefined ? { pages: parsed.pages } : {})
+  });
+  const replaced = await deleteChunksOf(docId);
+  if (replaced) log.warn({ docId, replaced }, 'retry: previous chunks removed before rewriting');
+
+  let written = 0;
+  for (let i = 0; i < parsed.pieces.length; i += env.embedBatchSize) {
+    const batch = parsed.pieces.slice(i, i + env.embedBatchSize);
+    const vectors = await embedMany(batch.map((p) => p.text));
+    const rows: ChunkDoc[] = [];
+    for (let j = 0; j < batch.length; j++) {
+      const piece = batch[j];
+      const embedding = vectors[j];
+      if (!piece || !embedding) throw new Error(`batch mismatch at ${i + j}`);
+      rows.push({
+        _id: `${docId}:${i + j}`,
+        docId,
+        spaceId: doc.spaceId,
+        userId: doc.userId,
+        text: piece.text,
+        locator: piece.locator,
+        ord: i + j,
+        embedding,
+        createdAt: new Date()
+      });
+    }
+    await insertChunks(rows);
+    written += rows.length;
+    // 10 → 90 across the batches; the last 10 points belong to the probe.
+    await setDocumentStatus(docId, {
+      pct: 10 + Math.round((written / parsed.pieces.length) * 80),
+      chunks: written
+    });
+    log.info({ docId, written, of: parsed.pieces.length }, 'chunks written');
+  }
+  throw new Error('probe not implemented yet');
 }
 
 async function runOne(job: JobDoc): Promise<void> {

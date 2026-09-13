@@ -35,9 +35,12 @@ export const env = {
   jobPollMs: num(process.env.JOB_POLL_MS, 1000),
   jobStaleMs: num(process.env.JOB_STALE_MS, 5 * 60 * 1000),
   jobMaxAttempts: num(process.env.JOB_MAX_ATTEMPTS, 3),
-  
+
   // RAG: the widest a chunk may be before it is split on line boundaries. Declared, not hard-coded.
   chunkMaxChars: num(process.env.CHUNK_MAX_CHARS, 1500),
+  
+  // Chunks per embeddings request. OpenAI accepts up to 2048 inputs; 64 keeps one failure small.
+  embedBatchSize: num(process.env.EMBED_BATCH_SIZE, 64),
 
   // The hard caps from AGENTS.md. Raising these to make a gate pass is the failure mode
   // the caps exist to catch. Two gears, two envelopes.
