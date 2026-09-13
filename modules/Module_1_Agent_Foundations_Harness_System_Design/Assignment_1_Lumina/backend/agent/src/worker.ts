@@ -10,15 +10,33 @@ import type { JobDoc } from '@lumina/contract';
 import { env } from './env.js';
 import { pingDb } from './db.js';
 import { claimJob, completeJob, failJob, sweepStaleJobs } from './jobs.js';
-import { setDocumentStatus } from './documents.js';
+import { findDocument, readUpload, setDocumentStatus } from './documents.js';
+import { parseDocument } from './ingest.js';
 
 const log = pino({ level: env.logLevel });
 const workerId = `${hostname()}:${process.pid}`;
 let stopping = false;
 
-/** Step 4 replaces this with the real ingest. Until then every job fails loud, which is the honest state. */
+/** Step 5 adds embed + write. Until then the job fails after parsing, and the log shows what the parser saw. */
 async function handle(job: JobDoc): Promise<void> {
-  throw new Error(`ingest not implemented yet (job ${job._id})`);
+  const docId = String(job.payload.docId);
+  const doc = await findDocument(docId);
+  if (!doc) throw new Error(`document ${docId} not found`);
+
+  await setDocumentStatus(docId, { status: 'parsing', pct: 5 });
+  const parsed = await parseDocument(await readUpload(doc.fileId), doc.mimeType);
+  log.info(
+    {
+      docId,
+      title: doc.title,
+      pages: parsed.pages,
+      pieces: parsed.pieces.length,
+      locators: parsed.pieces.slice(0, 4).map((p) => p.locator),
+      sample: parsed.pieces[0]?.text.slice(0, 80)
+    },
+    'parsed'
+  );
+  throw new Error('embedding not implemented yet');
 }
 
 async function runOne(job: JobDoc): Promise<void> {

@@ -34,6 +34,14 @@ async function storeUpload(
   });
 }
 
+/** The raw bytes back out of GridFS, for the worker. */
+export async function readUpload(fileId: string): Promise<Buffer> {
+  const stream = (await uploads()).openDownloadStream(new ObjectId(fileId));
+  const parts: Buffer[] = [];
+  for await (const part of stream) parts.push(part as Buffer);
+  return Buffer.concat(parts);
+}
+
 /**
  * The receipt: bytes to GridFS and a `pending` document row in parallel, then the `pending`
  * job row. The job is the trigger, so it is written last: a worker must never claim work
