@@ -9,9 +9,9 @@ import {
   type JobDoc
 } from '@lumina/contract';
 import { db } from './db.js';
+import { enqueueJob } from './jobs.js';
 
 const documents = async () => (await db()).collection<DocumentDoc>(COLLECTIONS.documents);
-const jobs = async () => (await db()).collection<JobDoc>(COLLECTIONS.jobs);
 let bucket: GridFSBucket | null = null;
 /** One bucket per process: the driver verifies GridFS's own indexes once per instance, and that is round trips. */
 export async function uploads(): Promise<GridFSBucket> {
@@ -73,7 +73,7 @@ export async function createDocument(input: {
     storeUpload(input.buffer, fileId, input.title, input.mimeType),
     (await documents()).insertOne(doc)
   ]);
-  await (await jobs()).insertOne(job);
+  await enqueueJob(job);
   return doc._id;
 }
 
@@ -89,4 +89,16 @@ export async function listDocuments(userId: string, spaceId: string): Promise<Do
     ...(d.chunks !== undefined ? { chunks: d.chunks } : {}),
     ...(d.error ? { error: d.error } : {})
   }));
+}
+
+/** The worker's only write to `documents`. Every status change goes through here so it is one place to grep. */
+export async function setDocumentStatus(
+  docId: string,
+  patch: Partial<Pick<DocumentDoc, 'status' | 'pct' | 'pages' | 'chunks' | 'error'>>
+): Promise<void> {
+  await (await documents()).updateOne({ _id: docId }, { $set: patch });
+}
+
+export async function findDocument(docId: string): Promise<DocumentDoc | null> {
+  return (await documents()).findOne({ _id: docId });
 }

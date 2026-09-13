@@ -31,6 +31,11 @@ export const env = {
   deepSubQuestionsMax: num(process.env.DEEP_SUB_QUESTIONS_MAX, 6),
   deepDailyCap: num(process.env.DEEP_DAILY_CAP, 5),
 
+  // Jobs worker: how often it polls, when a `running` row counts as abandoned, how many tries a document gets.
+  jobPollMs: num(process.env.JOB_POLL_MS, 1000),
+  jobStaleMs: num(process.env.JOB_STALE_MS, 5 * 60 * 1000),
+  jobMaxAttempts: num(process.env.JOB_MAX_ATTEMPTS, 3),
+
   // The hard caps from AGENTS.md. Raising these to make a gate pass is the failure mode
   // the caps exist to catch. Two gears, two envelopes.
   maxToolCalls: num(process.env.MAX_TOOL_CALLS, 8),
