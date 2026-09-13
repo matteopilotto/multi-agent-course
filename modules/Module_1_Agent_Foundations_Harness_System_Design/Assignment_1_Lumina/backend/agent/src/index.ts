@@ -48,7 +48,8 @@ import {
   USER_HEADER,
   newId,
   unresolvedCitations,
-  DoneEvent
+  DoneEvent,
+  ListMemoryResponse
 } from '@lumina/contract';
 import {
   createThread,
@@ -64,6 +65,7 @@ import { pingDb } from './db.js';
 import { openStream, send } from './sse.js';
 import { providerSearchCalls, runQuickLoop, newRunState } from './loop.js';
 import { writeRunLog } from './runlog.js';
+import { listMemories, deleteMemory } from './memory.js';
 
 const log = pino({ level: env.logLevel });
 const app = express();
@@ -188,6 +190,23 @@ app.post('/threads/:threadId/ask', async (req, res) => {
   res.end();
 });
 
+// ---------------------------------------------------------------- GET /memory · DELETE /memory/:memoryId
+
+app.get('/memory', async (req, res) => {
+  const userId = userIdOf(req);
+  if (!userId) return res.status(401).json({ error: `missing ${USER_HEADER}`, status: 401 });
+  const body: ListMemoryResponse = { memories: await listMemories(userId) };
+  res.json(body);
+});
+
+app.delete('/memory/:memoryId', async (req, res) => {
+  const userId = userIdOf(req);
+  if (!userId) return res.status(401).json({ error: `missing ${USER_HEADER}`, status: 401 });
+  const gone = await deleteMemory(userId, req.params.memoryId);
+  if (!gone) return res.status(404).json({ error: `no memory ${req.params.memoryId}`, status: 404 });
+  res.status(204).end();
+});
+
 // ---------------------------------------------------------------- everything else: 501
 
 const notImplemented = (route: string) => (_req: express.Request, res: express.Response) => {
@@ -197,7 +216,12 @@ const notImplemented = (route: string) => (_req: express.Request, res: express.R
 };
 
 for (const route of ROUTES) {
-  if (route.path === '/health' || route.path === '/evals/report.json' || route.path.startsWith('/threads'))
+  if (
+    route.path === '/health' ||
+    route.path === '/evals/report.json' ||
+    route.path.startsWith('/threads') ||
+    route.path.startsWith('/memory')
+  )
     continue;
   const method = route.method.toLowerCase() as 'get' | 'post' | 'delete';
   app[method](route.path, notImplemented(`${route.method} ${route.path}`));
