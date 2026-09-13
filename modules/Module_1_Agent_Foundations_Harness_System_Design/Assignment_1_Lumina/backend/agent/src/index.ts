@@ -55,7 +55,11 @@ import {
   type ListSpacesResponse,
   type RequestDoc,
   type RunDoc,
-  type Terminated
+  type Terminated,
+  ACCEPTED_UPLOAD_TYPES,
+  MAX_UPLOAD_BYTES,
+  type UploadDocumentResponse,
+  type ListDocumentsResponse
 } from '@lumina/contract';
 import {
   createThread,
@@ -73,6 +77,10 @@ import { providerSearchCalls, runQuickLoop, newRunState } from './loop.js';
 import { recordRequest, recordRun } from './runlog.js';
 import { listMemories, deleteMemory } from './memory.js';
 import { createSpace, listSpaces } from './spaces.js';
+import multer from 'multer';
+import { extname } from 'node:path';
+import { findSpace } from './spaces.js';
+import { createDocument, listDocuments } from './documents.js';
 
 const log = pino({ level: env.logLevel });
 const app = express();
@@ -290,6 +298,63 @@ app.get('/spaces', async (req, res) => {
   const userId = userIdOf(req);
   if (!userId) return res.status(401).json({ error: `missing ${USER_HEADER}`, status: 401 });
   const out: ListSpacesResponse = { spaces: await listSpaces(userId) };
+  res.json(out);
+});
+
+// ---------------------------------------------------------------- POST · GET /spaces/:spaceId/documents
+
+/** In memory: the request holds the bytes only long enough to hand them to GridFS. */
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_UPLOAD_BYTES, files: 1 } });
+
+const BY_EXT: Record<string, (typeof ACCEPTED_UPLOAD_TYPES)[number]> = {
+  '.pdf': 'application/pdf',
+  '.md': 'text/markdown',
+  '.markdown': 'text/markdown',
+  '.txt': 'text/plain'
+};
+/** Browsers lie about .md ("application/octet-stream"); the extension is the tie-breaker. */
+const acceptedType = (mime: string, filename: string) =>
+  (ACCEPTED_UPLOAD_TYPES as readonly string[]).includes(mime)
+    ? (mime as (typeof ACCEPTED_UPLOAD_TYPES)[number])
+    : BY_EXT[extname(filename).toLowerCase()];
+
+app.post('/spaces/:spaceId/documents', async (req, res) => {
+  const userId = userIdOf(req);
+  if (!userId) return res.status(401).json({ error: `missing ${USER_HEADER}`, status: 401 });
+  const space = await findSpace(userId, req.params.spaceId);
+  if (!space) return res.status(404).json({ error: `no space ${req.params.spaceId}`, status: 404 });
+
+  // Run multer by hand so its size error becomes a 413 instead of falling into the 502 handler.
+  const parsed = await new Promise<Error | null>((resolve) =>
+    upload.single('file')(req, res, (e) => resolve(e ?? null))
+  );
+  if (parsed) {
+    const status = (parsed as { code?: string }).code === 'LIMIT_FILE_SIZE' ? 413 : 400;
+    return res.status(status).json({ error: parsed.message, status });
+  }
+  const file = req.file;
+  if (!file) return res.status(400).json({ error: 'multipart field "file" is required', status: 400 });
+  const mimeType = acceptedType(file.mimetype, file.originalname);
+  if (!mimeType) return res.status(400).json({ error: `unsupported type ${file.mimetype}`, status: 400 });
+
+  const docId = await createDocument({
+    userId,
+    spaceId: space._id,
+    title: file.originalname,
+    mimeType,
+    buffer: file.buffer
+  });
+  
+  const out: UploadDocumentResponse = { docId, status: 'pending' };
+  res.status(202).json(out);
+});
+
+app.get('/spaces/:spaceId/documents', async (req, res) => {
+  const userId = userIdOf(req);
+  if (!userId) return res.status(401).json({ error: `missing ${USER_HEADER}`, status: 401 });
+  const space = await findSpace(userId, req.params.spaceId);
+  if (!space) return res.status(404).json({ error: `no space ${req.params.spaceId}`, status: 404 });
+  const out: ListDocumentsResponse = { documents: await listDocuments(userId, space._id) };
   res.json(out);
 });
 
