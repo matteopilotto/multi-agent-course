@@ -50,6 +50,9 @@ import {
   unresolvedCitations,
   DoneEvent,
   ListMemoryResponse,
+  CreateSpaceBody,
+  type CreateSpaceResponse,
+  type ListSpacesResponse,
   type RequestDoc,
   type RunDoc,
   type Terminated
@@ -69,6 +72,7 @@ import { openStream, send } from './sse.js';
 import { providerSearchCalls, runQuickLoop, newRunState } from './loop.js';
 import { recordRequest, recordRun } from './runlog.js';
 import { listMemories, deleteMemory } from './memory.js';
+import { createSpace, listSpaces } from './spaces.js';
 
 const log = pino({ level: env.logLevel });
 const app = express();
@@ -270,6 +274,25 @@ app.delete('/memory/:memoryId', async (req, res) => {
   res.status(204).end();
 });
 
+// ---------------------------------------------------------------- POST /spaces · GET /spaces
+
+app.post('/spaces', async (req, res) => {
+  const userId = userIdOf(req);
+  if (!userId) return res.status(401).json({ error: `missing ${USER_HEADER}`, status: 401 });
+  const body = CreateSpaceBody.safeParse(req.body ?? {});
+  if (!body.success) return res.status(400).json({ error: body.error.message, status: 400 });
+  const space = await createSpace(userId, body.data.name);
+  const out: CreateSpaceResponse = { spaceId: space._id, name: space.name };
+  res.status(201).json(out);
+});
+
+app.get('/spaces', async (req, res) => {
+  const userId = userIdOf(req);
+  if (!userId) return res.status(401).json({ error: `missing ${USER_HEADER}`, status: 401 });
+  const out: ListSpacesResponse = { spaces: await listSpaces(userId) };
+  res.json(out);
+});
+
 // ---------------------------------------------------------------- everything else: 501
 
 const notImplemented = (route: string) => (_req: express.Request, res: express.Response) => {
@@ -283,7 +306,8 @@ for (const route of ROUTES) {
     route.path === '/health' ||
     route.path === '/evals/report.json' ||
     route.path.startsWith('/threads') ||
-    route.path.startsWith('/memory')
+    route.path.startsWith('/memory') ||
+    route.path.startsWith('/spaces')
   )
     continue;
   const method = route.method.toLowerCase() as 'get' | 'post' | 'delete';
