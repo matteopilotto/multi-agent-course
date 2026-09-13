@@ -209,6 +209,16 @@ app.post('/threads/:threadId/ask', async (req, res) => {
       terminated: run.terminated,
       depth: 'quick'
     };
+    // Authoritative state first: `done` promises a follow-up will see this turn.
+    await appendMessage({
+      threadId: thread._id,
+      userId,
+      role: 'assistant',
+      content: run.text,
+      sources: run.sources,
+      answerId: done.answerId,
+      done
+    });
     send(res, 'done', done);
     log.info(
       {
