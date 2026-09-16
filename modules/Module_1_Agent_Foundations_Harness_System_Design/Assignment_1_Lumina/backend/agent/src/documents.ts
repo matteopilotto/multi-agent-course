@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { GridFSBucket, ObjectId } from 'mongodb';
+import { GridFSBucket, ObjectId, type UpdateFilter } from 'mongodb';
 import {
   COLLECTIONS,
   GRIDFS_BUCKETS,
@@ -104,7 +104,16 @@ export async function setDocumentStatus(
   docId: string,
   patch: Partial<Pick<DocumentDoc, 'status' | 'pct' | 'pages' | 'chunks' | 'error'>>
 ): Promise<void> {
-  await (await documents()).updateOne({ _id: docId }, { $set: patch });
+  const { error, ...rest } = patch;
+  // `error: undefined` means "clear it": the driver drops undefined from $set, so clearing needs $unset.
+  const clearError = error === undefined && 'error' in patch;
+  const fields = clearError ? rest : patch;
+  const update: UpdateFilter<DocumentDoc> = {};
+  if (Object.keys(fields).length) update.$set = fields;
+  if (clearError) update.$unset = { error: '' };
+  // Mongo rejects an update with no operators, and nothing legitimately asks to write nothing.
+  if (!update.$set && !update.$unset) throw new Error(`setDocumentStatus(${docId}) got an empty patch`);
+  await (await documents()).updateOne({ _id: docId }, update);
 }
 
 export async function findDocument(docId: string): Promise<DocumentDoc | null> {

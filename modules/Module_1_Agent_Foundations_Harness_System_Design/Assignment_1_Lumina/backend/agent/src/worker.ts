@@ -14,6 +14,7 @@ import { findDocument, readUpload, setDocumentStatus } from './documents.js';
 import { parseDocument } from './ingest.js';
 import { embedMany } from './embed.js';
 import { deleteChunksOf, insertChunks } from './chunks.js';
+import { vectorSearchChunks } from './retrieval.js';
 
 const log = pino({ level: env.logLevel });
 const workerId = `${hostname()}:${process.pid}`;
@@ -68,7 +69,35 @@ async function handle(job: JobDoc): Promise<void> {
     });
     log.info({ docId, written, of: parsed.pieces.length }, 'chunks written');
   }
-  throw new Error('probe not implemented yet');
+  // Read-your-write probe: a chunk we wrote, queried by its own vector, must come back before we say `indexed`.
+  const probeIndex = Math.floor(parsed.pieces.length / 2);
+  const probeId = `${docId}:${probeIndex}`;
+  const probeText = parsed.pieces[probeIndex]?.text;
+  if (!probeText) throw new Error(`probe piece ${probeIndex} missing`);
+  const [probeVector] = await embedMany([probeText]);
+  if (!probeVector) throw new Error('probe embedding missing');
+
+  const probeStart = Date.now();
+  let found = false;
+  let polls = 0;
+  while (Date.now() - probeStart < env.indexProbeTimeoutMs) {
+    polls++;
+    const hits = await vectorSearchChunks(doc.spaceId, doc.userId, probeVector, 5);
+    if (hits.some((h) => h.id === probeId)) {
+      found = true;
+      break;
+    }
+    await sleep(env.indexProbeIntervalMs);
+  }
+  const probeMs = Date.now() - probeStart;
+  if (!found) {
+    throw new Error(
+      `chunk ${probeId} not searchable after ${probeMs} ms (${polls} probes): index still building?`
+    );
+  }
+  log.info({ docId, probeId, probeMs, polls }, 'probe found the chunk');
+
+  await setDocumentStatus(docId, { status: 'indexed', pct: 100, chunks: written, error: undefined });
 }
 
 async function runOne(job: JobDoc): Promise<void> {

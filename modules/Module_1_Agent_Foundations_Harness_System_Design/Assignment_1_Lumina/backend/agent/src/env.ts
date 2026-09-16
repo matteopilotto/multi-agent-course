@@ -38,7 +38,11 @@ export const env = {
 
   // RAG: the widest a chunk may be before it is split on line boundaries. Declared, not hard-coded.
   chunkMaxChars: num(process.env.CHUNK_MAX_CHARS, 1500),
-  
+
+  // How long the worker waits for a freshly written chunk to become searchable before it fails the document.
+  indexProbeTimeoutMs: num(process.env.INDEX_PROBE_TIMEOUT_MS, 60000),
+  indexProbeIntervalMs: num(process.env.INDEX_PROBE_INTERVAL_MS, 1000),
+
   // Chunks per embeddings request. OpenAI accepts up to 2048 inputs; 64 keeps one failure small.
   embedBatchSize: num(process.env.EMBED_BATCH_SIZE, 64),
 
