@@ -13,7 +13,7 @@ import { claimJob, completeJob, failJob, sweepStaleJobs } from './jobs.js';
 import { findDocument, readUpload, setDocumentStatus } from './documents.js';
 import { parseDocument } from './ingest.js';
 import { embedMany } from './embed.js';
-import { ProviderError } from './tools.js';
+import { ProviderError } from './errors.js';
 import { deleteChunksOf, insertChunks } from './chunks.js';
 import { vectorSearchChunks } from './retrieval.js';
 

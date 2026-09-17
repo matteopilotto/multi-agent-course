@@ -1,23 +1,7 @@
 import { secrets } from './env.js';
+import { ProviderError } from './errors.js';
 
 export type SearchResult = { title: string; url: string; snippet: string };
-
-/** The provider itself failed, not one page. This ends the run (rule A1); a single bad fetch does not. */
-export class ProviderError extends Error {
-  /** The provider's HTTP status, or undefined when the call never got a reply at all. */
-  readonly status: number | undefined;
-
-  constructor(message: string, status?: number) {
-    super(message);
-    this.name = 'ProviderError';
-    this.status = status;
-  }
-
-  /** Rate limited, overloaded, or no reply: worth another go. A bad key or a bad request: never. */
-  get retryable(): boolean {
-    return this.status === undefined || this.status === 408 || this.status === 429 || this.status >= 500;
-  }
-}
 
 /** One HTTP call to Tavily. Throws on a non-2xx: fail loud, never return a plausible empty. */
 async function tavily<T>(path: string, body: Record<string, unknown>): Promise<T> {
@@ -31,7 +15,11 @@ async function tavily<T>(path: string, body: Record<string, unknown>): Promise<T
   });
   if (!r.ok) {
     const msg = `tavily ${path} ${r.status}: ${await r.text()}`;
-    if (path === 'search' || r.status >= 500) throw new ProviderError(msg, r.status);
+    // The provider refusing us is fatal wherever it happens: a bad key, no quota, or an outage
+    // is not "this page could not be read". Search has no per-page notion, so any failure there
+    // is fatal too. Everything else is one page failing, which the model should see and route around.
+    const refused = r.status === 401 || r.status === 403 || r.status === 429 || r.status >= 500;
+    if (refused || path === 'search') throw new ProviderError(msg, r.status);
     throw new Error(msg);
   }
   return (await r.json()) as T;

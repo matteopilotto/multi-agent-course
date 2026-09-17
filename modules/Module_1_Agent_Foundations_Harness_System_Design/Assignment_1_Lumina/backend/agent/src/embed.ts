@@ -1,6 +1,6 @@
 import { EMBEDDING_DIMS } from '@lumina/contract';
 import { env, secrets } from './env.js';
-import { ProviderError } from './tools.js';
+import { ProviderError } from './errors.js';
 
 /** OpenAI wraps its reason in JSON. Pull it out here: the layer that knows the provider's shape owns this. */
 async function detail(r: Response): Promise<string> {
