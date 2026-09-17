@@ -13,6 +13,7 @@ import { claimJob, completeJob, failJob, sweepStaleJobs } from './jobs.js';
 import { findDocument, readUpload, setDocumentStatus } from './documents.js';
 import { parseDocument } from './ingest.js';
 import { embedMany } from './embed.js';
+import { ProviderError } from './tools.js';
 import { deleteChunksOf, insertChunks } from './chunks.js';
 import { vectorSearchChunks } from './retrieval.js';
 
@@ -22,6 +23,7 @@ let stopping = false;
 
 /** Step 5 adds embed + write. Until then the job fails after parsing, and the log shows what the parser saw. */
 async function handle(job: JobDoc): Promise<void> {
+
   const docId = String(job.payload.docId);
   const doc = await findDocument(docId);
   if (!doc) throw new Error(`document ${docId} not found`);
@@ -100,6 +102,12 @@ async function handle(job: JobDoc): Promise<void> {
   await setDocumentStatus(docId, { status: 'indexed', pct: 100, chunks: written, error: undefined });
 }
 
+/** The document row is read by a person in the UI; the log is read by you. Cap what goes on the row. */
+const brief = (message: string, max = 200): string => {
+  const line = message.replace(/\s+/g, ' ').trim();
+  return line.length > max ? `${line.slice(0, max - 1)}…` : line;
+};
+
 async function runOne(job: JobDoc): Promise<void> {
   const docId = String(job.payload.docId);
   const t0 = Date.now();
@@ -109,10 +117,20 @@ async function runOne(job: JobDoc): Promise<void> {
     await completeJob(job._id);
     log.info({ jobId: job._id, docId, ms: Date.now() - t0 }, 'job done');
   } catch (err) {
-    const error = err instanceof Error ? err.message : String(err);
-    await failJob(job._id, error);
-    await setDocumentStatus(docId, { status: 'failed', error });
-    log.error({ jobId: job._id, docId, attempt: job.attempts, ms: Date.now() - t0, err }, 'job failed');
+    const message = err instanceof Error ? err.message : String(err);
+    const retryable = err instanceof ProviderError && err.retryable;
+    const outcome = await failJob(job._id, message, retryable);
+    // Requeued means work is still owed, so the document goes back to pending instead of claiming it failed.
+    await setDocumentStatus(
+      docId,
+      outcome === 'requeued'
+        ? { status: 'pending', pct: 0, error: undefined }
+        : { status: 'failed', error: brief(message) }
+    );
+    log.error(
+      { jobId: job._id, docId, attempt: job.attempts, ms: Date.now() - t0, outcome, retryable, err },
+      outcome === 'requeued' ? 'job failed, will retry' : 'job failed'
+    );
   }
 }
 

@@ -24,8 +24,26 @@ export async function completeJob(jobId: string): Promise<void> {
   await (await jobs()).updateOne({ _id: jobId }, { $set: { status: 'done' }, $unset: { error: '' } });
 }
 
-export async function failJob(jobId: string, error: string): Promise<void> {
-  await (await jobs()).updateOne({ _id: jobId }, { $set: { status: 'failed', error } });
+export type FailOutcome = 'requeued' | 'failed';
+
+/**
+ * A job that threw is not automatically dead. A retryable error goes back to `pending` while
+ * attempts remain, so a provider's bad minute does not kill a document permanently. Anything
+ * else fails at once, because retrying a bad key just fails three times instead of one.
+ */
+export async function failJob(jobId: string, error: string, retryable: boolean): Promise<FailOutcome> {
+  const col = await jobs();
+  const job = await col.findOne({ _id: jobId });
+  const attempts = job?.attempts ?? env.jobMaxAttempts;
+  if (retryable && attempts < env.jobMaxAttempts) {
+    await col.updateOne(
+      { _id: jobId },
+      { $set: { status: 'pending', error }, $unset: { claimedAt: '', workerId: '' } }
+    );
+    return 'requeued';
+  }
+  await col.updateOne({ _id: jobId }, { $set: { status: 'failed', error } });
+  return 'failed';
 }
 
 /**

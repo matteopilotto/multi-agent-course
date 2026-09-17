@@ -2,6 +2,16 @@ import { EMBEDDING_DIMS } from '@lumina/contract';
 import { env, secrets } from './env.js';
 import { ProviderError } from './tools.js';
 
+/** OpenAI wraps its reason in JSON. Pull it out here: the layer that knows the provider's shape owns this. */
+async function detail(r: Response): Promise<string> {
+  const body = await r.text();
+  try {
+    return (JSON.parse(body) as { error?: { message?: string } }).error?.message ?? body;
+  } catch {
+    return body;
+  }
+}
+
 /**
  * Texts → 1536-dim vectors, one HTTP call, order preserved. Native fetch on purpose: the
  * openai SDK's bundled node-fetch closes gzip streams early on Node 22 ("Premature close").
@@ -17,7 +27,7 @@ export async function embedMany(texts: string[]): Promise<number[][]> {
     },
     body: JSON.stringify({ model: env.embeddingModel, input: texts })
   });
-  if (!r.ok) throw new ProviderError(`openai embeddings ${r.status}: ${await r.text()}`);
+  if (!r.ok) throw new ProviderError(`openai embeddings ${r.status}: ${await detail(r)}`, r.status);
   const data = (await r.json()) as { data: { index: number; embedding: number[] }[] };
   if (data.data.length !== texts.length) {
     throw new ProviderError(`embedding returned ${data.data.length} vectors for ${texts.length} inputs`);
