@@ -8,6 +8,7 @@ import { cachedWebSearch } from './cache.js';
 import { send } from './sse.js';
 import pino from 'pino';
 import { recallMemory, saveMemory, type Recalled } from './memory.js';
+import type { ModelUsage } from './cost.js';
 
 const log = pino({ level: env.logLevel });
 
@@ -72,11 +73,19 @@ function historyText(history: ThreadMessage[]): string {
 /** Owned by the route, filled by the loop, so it survives a throw. */
 export type RunState = {
   toolCalls: RunLog['toolCalls'];
+  /** The run total, for done.tokens and the run log. */
   tokens: { in: number; out: number };
+  /** The same tokens split by model, because the two phases run on models with different prices. */
+  usage: ModelUsage;
   /** One entry per successful web_search: true when a cache tier answered. Failures never push. */
   searchHits: boolean[];
 };
-export const newRunState = (): RunState => ({ toolCalls: [], tokens: { in: 0, out: 0 }, searchHits: [] });
+export const newRunState = (): RunState => ({
+  toolCalls: [],
+  tokens: { in: 0, out: 0 },
+  usage: {},
+  searchHits: []
+});
 
 /** Only misses reached the provider, so only misses are billed. */
 export const providerSearchCalls = (s: RunState) => s.searchHits.filter((hit) => !hit).length;
@@ -123,10 +132,15 @@ export async function runQuickLoop(
   ctx: RunContext,
   history: ThreadMessage[] = []
 ): Promise<LoopResult> {
-  const { toolCalls, tokens, searchHits } = state;
-  const addUsage = (u: Anthropic.Usage) => {
+  const { toolCalls, tokens, usage, searchHits } = state;
+  /** Every model call passes through here, so the total and the per-model split can never drift apart. */
+  const addUsage = (model: string, u: Anthropic.Usage) => {
     tokens.in += u.input_tokens;
     tokens.out += u.output_tokens;
+    const bucket = usage[model] ?? { in: 0, out: 0 };
+    bucket.in += u.input_tokens;
+    bucket.out += u.output_tokens;
+    usage[model] = bucket;
   };
   let firstTokenAt = 0;
   const pages: Page[] = [];
@@ -261,7 +275,7 @@ export async function runQuickLoop(
       'model call'
     );
 
-    addUsage(response.usage);
+    addUsage(env.llmModelResearch, response.usage);
     messages.push({ role: 'assistant', content: response.content });
     if (response.stop_reason !== 'tool_use') break;
 
@@ -339,7 +353,7 @@ export async function runQuickLoop(
     send(res, 'token', { text: delta });
   });
   const final = await stream.finalMessage();
-  addUsage(final.usage);
+  addUsage(env.llmModel, final.usage);
   const text = final.content
     .filter((b) => b.type === 'text')
     .map((b) => b.text)

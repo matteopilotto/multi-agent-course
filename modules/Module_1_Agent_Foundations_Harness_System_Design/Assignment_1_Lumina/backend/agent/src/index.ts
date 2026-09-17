@@ -218,7 +218,7 @@ app.post('/threads/:threadId/ask', async (req, res) => {
     const run = await runQuickLoop(query, res, startedAt, state, { userId, threadId: thread._id }, history);
     const dangling = unresolvedCitations(run.text, run.sources);
     if (dangling.length) log.warn({ requestId, dangling }, 'answer cites numbers that are not in sources');
-    const cost = costUsd(state.tokens, run.searchCalls);
+    const cost = costUsd(state.usage, run.searchCalls);
     const done: DoneEvent = {
       answerId: newId('ans'),
       latencyMs: Date.now() - startedAt,
@@ -247,6 +247,7 @@ app.post('/threads/:threadId/ask', async (req, res) => {
         toolCalls: state.toolCalls.length,
         terminated: run.terminated,
         tokens: state.tokens,
+        usage: state.usage, // the per-model split the bill was computed from
         costUsd: cost,
         searchCached: run.searchCached,
         ttftMs: run.ttftMs,
@@ -256,7 +257,7 @@ app.post('/threads/:threadId/ask', async (req, res) => {
     );
     await record(run.terminated, cost, 200, done.answerId);
   } catch (e) {
-    const cost = costUsd(state.tokens, providerSearchCalls(state));
+    const cost = costUsd(state.usage, providerSearchCalls(state));
     log.error(
       {
         requestId,

@@ -15,7 +15,7 @@
     "accept_202_p95_ms": 300,
     "search_p95_during_ingest_ratio_max": 1.3,
     "min_citation_grounding": 0.95,
-    "min_recall_at_5": 0.70,
+    "min_recall_at_5": 0.7,
     "min_search_cache_hit_rate_pct": 50,
     "max_error_rate_pct": 1.0,
     "max_cost_per_answer_usd": 0.05,
@@ -37,6 +37,11 @@
     "llm_model": "claude-sonnet-5",
     "input_usd_per_mtok": 3.0,
     "output_usd_per_mtok": 15.0,
+    "_models_comment": "Per-model rates. The top-level numbers stay as the default for any model not listed, and they are the expensive ones on purpose: an unknown model is billed as if it were Sonnet, so a pricing gap can only ever overstate the bill.",
+    "models": {
+      "claude-sonnet-5": { "input_usd_per_mtok": 3.0, "output_usd_per_mtok": 15.0 },
+      "claude-haiku-4-5-20251001": { "input_usd_per_mtok": 1.0, "output_usd_per_mtok": 5.0 }
+    },
     "embedding_model": "text-embedding-3-small",
     "embedding_usd_per_mtok": 0.02,
     "search_usd_per_call": 0.008,
