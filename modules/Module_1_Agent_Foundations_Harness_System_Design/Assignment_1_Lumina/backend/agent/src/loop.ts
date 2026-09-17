@@ -266,8 +266,36 @@ export async function runQuickLoop(
     if (response.stop_reason !== 'tool_use') break;
 
     const toolBlocks = response.content.filter((b): b is Anthropic.ToolUseBlock => b.type === 'tool_use');
+
+    // A3: the model may ask for ten fetches in one turn. The harness runs at most
+    // env.maxSameToolInARow blocks of any one tool and refuses the rest, so a burst cannot
+    // outrun expectations.json's maxConsecutiveSameTool. The refusal is a tool_result with
+    // is_error, not silence: the model has to see why it got nothing back, and the API
+    // rejects the next turn unless every tool_use block is answered.
+    const seen = new Map<string, number>();
     const results: Anthropic.ToolResultBlockParam[] = await Promise.all(
       toolBlocks.map(async (block) => {
+        const nth = (seen.get(block.name) ?? 0) + 1;
+        seen.set(block.name, nth);
+        if (nth > env.maxSameToolInARow) {
+          // Never reaches callTool, so it is never traced, never counted, never billed.
+          // It still gets logged: a gate that fires silently is a gate you cannot debug.
+          log.warn(
+            {
+              tool: block.name,
+              asked: toolBlocks.filter((b) => b.name === block.name).length,
+              ran: env.maxSameToolInARow
+            },
+            'tool blocks refused: same tool too many times in one turn'
+          );
+          return {
+            type: 'tool_result' as const,
+            tool_use_id: block.id,
+            content: `ERROR: refused. At most ${env.maxSameToolInARow} ${block.name} calls per turn. Work with the results you already have, or ask for fewer.`,
+            is_error: true
+          };
+        }
+
         const { output, error } = await callTool(
           block.name as TraceEvent['tool'],
           block.input as Record<string, unknown>

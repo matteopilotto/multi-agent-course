@@ -53,6 +53,10 @@ export const env = {
   maxToolCallsDeep: num(process.env.MAX_TOOL_CALLS_DEEP, 24),
   maxWallClockSecDeep: num(process.env.MAX_WALL_CLOCK_SEC_DEEP, 240),
 
+  // A3: the model may ask for any number of tool blocks in one turn; the harness executes at
+  // most this many of the same tool, so a fetch storm cannot outrun `maxConsecutiveSameTool`.
+  maxSameToolInARow: num(process.env.MAX_SAME_TOOL_IN_A_ROW, 4),
+
   logLevel: process.env.LOG_LEVEL ?? 'info',
   nodeEnv: process.env.NODE_ENV ?? 'development',
   /** Where the per-answer run logs land. quality/check.mjs reads this folder. */
