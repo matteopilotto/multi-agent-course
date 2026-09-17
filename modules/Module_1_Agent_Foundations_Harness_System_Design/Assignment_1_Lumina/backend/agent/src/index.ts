@@ -81,6 +81,7 @@ import multer from 'multer';
 import { extname } from 'node:path';
 import { findSpace } from './spaces.js';
 import { createDocument, listDocuments } from './documents.js';
+import { getStats } from './stats.js';
 
 const log = pino({ level: env.logLevel });
 const app = express();
@@ -107,6 +108,14 @@ app.get('/health', async (_req, res) => {
     ai: { status: 'ok' }
   };
   res.status(dbStatus === 'ok' ? 200 : 503).json(body);
+});
+
+// ---------------------------------------------------------------- GET /stats
+
+app.get('/stats', async (req, res) => {
+  const userId = userIdOf(req);
+  if (!userId) return res.status(401).json({ error: `missing ${USER_HEADER}`, status: 401 });
+  res.json(await getStats(userId));
 });
 
 // ---------------------------------------------------------------- POST /threads
@@ -344,7 +353,7 @@ app.post('/spaces/:spaceId/documents', async (req, res) => {
     mimeType,
     buffer: file.buffer
   });
-  
+
   const out: UploadDocumentResponse = { docId, status: 'pending' };
   res.status(202).json(out);
 });
@@ -370,6 +379,7 @@ for (const route of ROUTES) {
   if (
     route.path === '/health' ||
     route.path === '/evals/report.json' ||
+    route.path === '/stats' ||
     route.path.startsWith('/threads') ||
     route.path.startsWith('/memory') ||
     route.path.startsWith('/spaces')
