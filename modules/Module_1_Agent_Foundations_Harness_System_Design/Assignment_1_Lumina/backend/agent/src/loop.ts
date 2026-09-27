@@ -323,8 +323,16 @@ export async function runQuickLoop(
   if (known) opening = `${known}\n\n${opening}`;
   const messages: Anthropic.MessageParam[] = [{ role: 'user', content: opening }];
 
+  // A docs-only question whose pre-search already filled top-k leaves a research turn nothing to
+  // decide: there are no pages to pick, and the model only ever replied READY — a whole Haiku call
+  // (1.5–2.5 s measured) of TTFT for nothing. The price: save_memory is only reachable from a
+  // research turn, so a durable fact stated inside such a question is not saved.
+  const docsFull = () => !useWeb && docLists.flat().length >= env.ragTopK;
+  const skipResearch = !history.length && docsFull();
+  if (skipResearch) log.debug({ phase: 'research', skipped: true }, 'pre-search already has top-k');
+
   // ---- phase 1: research. Tools on. Nothing streams but the trace.
-  while (true) {
+  while (!skipResearch) {
     if (step >= env.maxToolCalls || Date.now() > deadline) {
       terminated = 'cap';
       break;
@@ -389,7 +397,7 @@ export async function runQuickLoop(
     // Enough to answer from: two fetched pages; or, with no web half, a full set of passages; or the
     // document side is exhausted — a search that found nothing new, or the search budget spent.
     const docsDone = staleDocSearch || docSearches >= env.maxDocSearches;
-    if (pages.length >= 2 || (!useWeb && docLists.flat().length >= env.ragTopK) || docsDone) break;
+    if (pages.length >= 2 || docsFull() || docsDone) break;
   }
 
   // ---- between the phases: the sources exist now, and the contract wants them before any token.
