@@ -95,6 +95,20 @@ app.use((req, res, next) =>
 
 mkdirSync(env.runsDir, { recursive: true });
 
+/**
+ * Express 4 does not route a rejected promise from an async handler to the error middleware:
+ * it becomes an unhandled rejection and Node exits. One slow Atlas connect killed the whole
+ * agent this way. Every async route goes through here, so a failure is a 502, not a dead process.
+ */
+const safe =
+  <P extends Record<string, string> = Record<string, string>>(
+    h: (req: express.Request<P>, res: express.Response) => Promise<unknown>
+  ): express.RequestHandler<P> =>
+  (req, res, next) => {
+    h(req, res).catch(next);
+  };
+
+
 // ---------------------------------------------------------------- /health (implemented)
 
 app.get('/health', async (_req, res) => {
@@ -123,32 +137,32 @@ app.get('/stats', async (req, res) => {
 /** The gateway will reject a missing header before it gets here; the agent still refuses, because every row needs an owner. */
 const userIdOf = (req: express.Request): string | undefined => req.header(USER_HEADER)?.trim() || undefined;
 
-app.post('/threads', async (req, res) => {
+app.post('/threads', safe(async (req, res) => {
   const userId = userIdOf(req);
   if (!userId) return res.status(401).json({ error: `missing ${USER_HEADER}`, status: 401 });
   const body = CreateThreadBody.safeParse(req.body ?? {});
   if (!body.success) return res.status(400).json({ error: body.error.message, status: 400 });
   const threadId = await createThread(userId, body.data.title);
   res.status(201).json({ threadId });
-});
+}));
 
-app.get('/threads', async (req, res) => {
+app.get('/threads', safe(async (req, res) => {
   const userId = userIdOf(req);
   if (!userId) return res.status(401).json({ error: `missing ${USER_HEADER}`, status: 401 });
   res.json({ threads: await listThreads(userId) });
-});
+}));
 
-app.get('/threads/:threadId', async (req, res) => {
+app.get('/threads/:threadId', safe<{ threadId: string }>(async (req, res) => {
   const userId = userIdOf(req);
   if (!userId) return res.status(401).json({ error: `missing ${USER_HEADER}`, status: 401 });
   const thread = await findThread(userId, req.params.threadId);
   if (!thread) return res.status(404).json({ error: `no thread ${req.params.threadId}`, status: 404 });
   res.json({ threadId: thread._id, title: thread.title, messages: await threadMessages(thread._id) });
-});
+}));
 
 // ---------------------------------------------------------------- POST /threads/:threadId/ask
 
-app.post('/threads/:threadId/ask', async (req, res) => {
+app.post('/threads/:threadId/ask', safe<{ threadId: string }>(async (req, res) => {
   const userId = userIdOf(req);
   if (!userId) return res.status(401).json({ error: `missing ${USER_HEADER}`, status: 401 });
   const body = AskBody.safeParse(req.body);
@@ -290,28 +304,28 @@ app.post('/threads/:threadId/ask', async (req, res) => {
     await record('error', cost, 502);
   }
   res.end();
-});
+}));
 
 // ---------------------------------------------------------------- GET /memory · DELETE /memory/:memoryId
 
-app.get('/memory', async (req, res) => {
+app.get('/memory', safe(async (req, res) => {
   const userId = userIdOf(req);
   if (!userId) return res.status(401).json({ error: `missing ${USER_HEADER}`, status: 401 });
   const body: ListMemoryResponse = { memories: await listMemories(userId) };
   res.json(body);
-});
+}));
 
-app.delete('/memory/:memoryId', async (req, res) => {
+app.delete('/memory/:memoryId', safe<{ memoryId: string }>(async (req, res) => {
   const userId = userIdOf(req);
   if (!userId) return res.status(401).json({ error: `missing ${USER_HEADER}`, status: 401 });
   const gone = await deleteMemory(userId, req.params.memoryId);
   if (!gone) return res.status(404).json({ error: `no memory ${req.params.memoryId}`, status: 404 });
   res.status(204).end();
-});
+}));
 
 // ---------------------------------------------------------------- POST /spaces · GET /spaces
 
-app.post('/spaces', async (req, res) => {
+app.post('/spaces', safe(async (req, res) => {
   const userId = userIdOf(req);
   if (!userId) return res.status(401).json({ error: `missing ${USER_HEADER}`, status: 401 });
   const body = CreateSpaceBody.safeParse(req.body ?? {});
@@ -319,14 +333,14 @@ app.post('/spaces', async (req, res) => {
   const space = await createSpace(userId, body.data.name);
   const out: CreateSpaceResponse = { spaceId: space._id, name: space.name };
   res.status(201).json(out);
-});
+}));
 
-app.get('/spaces', async (req, res) => {
+app.get('/spaces', safe(async (req, res) => {
   const userId = userIdOf(req);
   if (!userId) return res.status(401).json({ error: `missing ${USER_HEADER}`, status: 401 });
   const out: ListSpacesResponse = { spaces: await listSpaces(userId) };
   res.json(out);
-});
+}));
 
 // ---------------------------------------------------------------- POST · GET /spaces/:spaceId/documents
 
@@ -345,7 +359,7 @@ const acceptedType = (mime: string, filename: string) =>
     ? (mime as (typeof ACCEPTED_UPLOAD_TYPES)[number])
     : BY_EXT[extname(filename).toLowerCase()];
 
-app.post('/spaces/:spaceId/documents', async (req, res) => {
+app.post('/spaces/:spaceId/documents', safe<{ spaceId: string }>(async (req, res) => {
   const userId = userIdOf(req);
   if (!userId) return res.status(401).json({ error: `missing ${USER_HEADER}`, status: 401 });
   const space = await findSpace(userId, req.params.spaceId);
@@ -374,16 +388,16 @@ app.post('/spaces/:spaceId/documents', async (req, res) => {
 
   const out: UploadDocumentResponse = { docId, status: 'pending' };
   res.status(202).json(out);
-});
+}));
 
-app.get('/spaces/:spaceId/documents', async (req, res) => {
+app.get('/spaces/:spaceId/documents', safe<{ spaceId: string }>(async (req, res) => {
   const userId = userIdOf(req);
   if (!userId) return res.status(401).json({ error: `missing ${USER_HEADER}`, status: 401 });
   const space = await findSpace(userId, req.params.spaceId);
   if (!space) return res.status(404).json({ error: `no space ${req.params.spaceId}`, status: 404 });
   const out: ListDocumentsResponse = { documents: await listDocuments(userId, space._id) };
   res.json(out);
-});
+}));
 
 // ---------------------------------------------------------------- everything else: 501
 
@@ -409,8 +423,9 @@ for (const route of ROUTES) {
 
 app.use((req, res) => res.status(404).json({ error: `no route ${req.method} ${req.path}`, status: 404 }));
 
-app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+app.use((err: Error, _req: express.Request, res: express.Response, next: express.NextFunction) => {
   log.error({ err }, 'agent error');
+  if (res.headersSent) return next(err); // mid-stream: the 200 is gone, Express closes the connection
   res.status(502).json({ error: err.message, status: 502 });
 });
 
