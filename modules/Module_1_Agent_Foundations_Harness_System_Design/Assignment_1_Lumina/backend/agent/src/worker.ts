@@ -23,7 +23,6 @@ let stopping = false;
 
 /** Step 5 adds embed + write. Until then the job fails after parsing, and the log shows what the parser saw. */
 async function handle(job: JobDoc): Promise<void> {
-
   const docId = String(job.payload.docId);
   const doc = await findDocument(docId);
   if (!doc) throw new Error(`document ${docId} not found`);
@@ -127,6 +126,12 @@ async function runOne(job: JobDoc): Promise<void> {
         ? { status: 'pending', pct: 0, error: undefined }
         : { status: 'failed', error: brief(message) }
     );
+    // Chunks are derived data, and a document the UI calls `failed` must not stay searchable:
+    // one that inserted its chunks and then failed the probe is citable while its own status
+    // says it failed. Only on a terminal failure — a requeued job still owns its chunks, and
+    // the next attempt deletes them itself.
+    if (outcome !== 'requeued') await deleteChunksOf(docId);
+
     log.error(
       { jobId: job._id, docId, attempt: job.attempts, ms: Date.now() - t0, outcome, retryable, err },
       outcome === 'requeued' ? 'job failed, will retry' : 'job failed'
