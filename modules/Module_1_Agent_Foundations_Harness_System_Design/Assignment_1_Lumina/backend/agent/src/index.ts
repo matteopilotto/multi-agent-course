@@ -229,8 +229,14 @@ app.post('/threads/:threadId/ask', safe<{ threadId: string }>(async (req, res) =
 
   // Read the history BEFORE appending this turn, or the question shows up twice.
   const history = await threadMessages(thread._id);
-  await appendMessage({ threadId: thread._id, userId, role: 'user', content: query, sources: [] });
-  await titleFromFirstQuery(thread._id, query);
+  // The user turn and the title are writes nothing reads until the next request, so they run
+  // alongside the planner instead of in front of it: two M0 round trips off deep's time to plan.
+  // Awaited before `done`, because `done` promises a follow-up will see this turn.
+  const saved = Promise.all([
+    appendMessage({ threadId: thread._id, userId, role: 'user', content: query, sources: [] }),
+    titleFromFirstQuery(thread._id, query)
+  ]);
+  saved.catch(() => {}); // marks it handled so Node does not exit; the real await below still throws
 
   openStream(res);
   try {
@@ -243,6 +249,7 @@ app.post('/threads/:threadId/ask', safe<{ threadId: string }>(async (req, res) =
         userId,
         threadId: thread._id,
         mode: body.data.mode,
+        depth: body.data.depth,
         spaceId: body.data.spaceId
       },
       history
@@ -261,7 +268,9 @@ app.post('/threads/:threadId/ask', safe<{ threadId: string }>(async (req, res) =
       terminated: run.terminated,
       depth: 'quick'
     };
-    // Authoritative state first: `done` promises a follow-up will see this turn.
+    // Authoritative state first: `done` promises a follow-up will see this turn. The user turn
+    // lands before the answer, and a failed write ends the run here instead of behind a `done`.
+    await saved;
     await appendMessage({
       threadId: thread._id,
       userId,

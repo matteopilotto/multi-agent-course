@@ -20,6 +20,7 @@ export const env = {
   llmProvider: process.env.LLM_PROVIDER ?? 'anthropic',
   llmModel: process.env.LLM_MODEL ?? 'claude-sonnet-5',
   llmModelResearch: process.env.LLM_MODEL_RESEARCH ?? 'claude-haiku-4-5-20251001',
+  llmModelPlanner: process.env.LLM_MODEL_PLANNER ?? 'claude-haiku-4-5-20251001',
 
   searchProvider: (process.env.SEARCH_PROVIDER ?? 'tavily') as 'tavily' | 'serpapi',
   searchCacheTtlSeconds: num(process.env.SEARCH_CACHE_TTL_SECONDS, 21600),

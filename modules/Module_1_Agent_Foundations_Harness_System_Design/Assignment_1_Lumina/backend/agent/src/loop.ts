@@ -1,6 +1,15 @@
 import Anthropic from '@anthropic-ai/sdk';
 import type { Response } from 'express';
-import type { AskMode, RunLog, Source, Terminated, ThreadMessage, TraceEvent } from '@lumina/contract';
+import type {
+  AskMode,
+  Depth,
+  PlanEvent,
+  RunLog,
+  Source,
+  Terminated,
+  ThreadMessage,
+  TraceEvent
+} from '@lumina/contract';
 import { env, secrets } from './env.js';
 import { TOOL_SCHEMAS, fetchPage } from './tools.js';
 import { ProviderError } from './errors.js';
@@ -11,6 +20,7 @@ import { recallMemory, saveMemory, type Recalled } from './memory.js';
 import type { ModelUsage } from './cost.js';
 import { hybridSearchChunks, rrf, type ChunkHit } from './retrieval.js';
 import { documentTitles } from './documents.js';
+import { planResearch } from './planner.js';
 
 const log = pino({ level: env.logLevel });
 
@@ -131,6 +141,8 @@ export type RunContext = {
   threadId: string;
   /** Where to look. The router is this field plus toolsFor below, not a sentence in a prompt. */
   mode: AskMode;
+  /** Which gear. Opted into by the caller, never upgraded here: deep plans first, quick never can. */
+  depth: Depth;
   spaceId?: string;
 };
 
@@ -289,6 +301,37 @@ export async function runQuickLoop(
     toolCalls.push({ name, ok: !error, ms, ...(error ? { error } : {}) });
     if (fatal) throw fatal;
     return { output, error };
+  }
+
+  // ---- deep only: the plan, before any retrieval. A harness step because it may not be skipped
+  // and may not come second. Nothing runs in parallel with it, or its trace could beat `plan`
+  // onto the wire. A failed plan ends the run: the server never quietly downgrades deep to quick.
+  let plan: PlanEvent | undefined;
+  if (ctx.depth === 'deep') {
+    step += 1;
+    const t0 = Date.now();
+    try {
+      const r = await planResearch(query, history.length ? historyText(history) : '');
+      addUsage(r.model, r.usage);
+      plan = r.plan;
+    } catch (e) {
+      const error = e instanceof Error ? e.message : String(e);
+      const ms = Date.now() - t0;
+      send(res, 'trace', { step, tool: 'plan_research', input: { query }, ok: false, ms, error });
+      toolCalls.push({ name: 'plan_research', ok: false, ms, error });
+      throw e;
+    }
+    const ms = Date.now() - t0;
+    send(res, 'plan', plan);
+    send(res, 'trace', {
+      step,
+      tool: 'plan_research',
+      input: { query },
+      ok: true,
+      ms,
+      reason: `harness: deep search, ${plan.subQuestions.length} sub-questions`
+    });
+    toolCalls.push({ name: 'plan_research', ok: true, ms });
   }
 
   // ---- phase 0: recall always runs here, as a harness step, because a model that forgets to
