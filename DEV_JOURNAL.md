@@ -9,3 +9,4 @@ One entry per session, in `docs/journal/YYYY-MM-DD-short-title.md`.
 - [2026-09-13 — LUMINA: the run log grows a Mongo half, and a regression rides along](docs/journal/2026-09-13-lumina-run-log.md)
 - [2026-09-17 — LUMINA: Spaces, the jobs worker, and what the failure tests found](docs/journal/2026-09-17-lumina-spaces-jobs-worker.md)
 - [2026-09-17 — LUMINA: the thrash guard, `/stats`, and a bill that can be checked](docs/journal/2026-09-17-lumina-thrash-guard-stats-cost.md)
+- [2026-09-27 — LUMINA: hybrid retrieval tested through `/ask`, and where TTFT goes](docs/journal/2026-09-27-lumina-hybrid-smoke-test-ttft.md)
