@@ -39,6 +39,17 @@ export const env = {
   // RAG: the widest a chunk may be before it is split on line boundaries. Declared, not hard-coded.
   chunkMaxChars: num(process.env.CHUNK_MAX_CHARS, 1500),
 
+  // Hybrid retrieval, declared not hard-coded (SPEC 5.4). ragTopK is what search_documents
+  // returns and what recall@5 is measured against. Each branch fetches ragCandidates FIRST,
+  // because RRF can only fuse what it was shown. rrfK damps the rank gap: at 1 whoever is
+  // first anywhere wins, at 10000 only membership counts, 60 is the convention in between.
+  ragTopK: num(process.env.RAG_TOP_K, 5),
+  ragCandidates: num(process.env.RAG_CANDIDATES, 20),
+  rrfK: num(process.env.RRF_K, 60),
+  // A docs-only research phase has no "two pages fetched" exit, so the harness ends it: after
+  // this many search_documents calls (the pre-search counts), or sooner if one finds nothing new.
+  maxDocSearches: num(process.env.MAX_DOC_SEARCHES, 3),
+
   // How long the worker waits for a freshly written chunk to become searchable before it fails the document.
   indexProbeTimeoutMs: num(process.env.INDEX_PROBE_TIMEOUT_MS, 60000),
   indexProbeIntervalMs: num(process.env.INDEX_PROBE_INTERVAL_MS, 1000),

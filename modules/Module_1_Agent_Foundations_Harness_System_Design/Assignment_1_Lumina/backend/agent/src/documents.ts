@@ -119,3 +119,15 @@ export async function setDocumentStatus(
 export async function findDocument(docId: string): Promise<DocumentDoc | null> {
   return (await documents()).findOne({ _id: docId });
 }
+
+/** docId → title for a handful of ids in one round trip. Citations render "filename, p. N". */
+export async function documentTitles(docIds: string[]): Promise<Map<string, string>> {
+  if (!docIds.length) return new Map();
+  const rows = await (
+    await documents()
+  )
+    .find({ _id: { $in: docIds } })
+    .project<{ _id: string; title: string }>({ title: 1 })
+    .toArray();
+  return new Map(rows.map((d) => [d._id, d.title]));
+}

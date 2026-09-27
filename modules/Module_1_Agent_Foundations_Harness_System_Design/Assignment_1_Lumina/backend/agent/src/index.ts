@@ -156,6 +156,11 @@ app.post('/threads/:threadId/ask', async (req, res) => {
   // Before the stream opens: a status code can still carry the failure here, not after.
   const thread = await findThread(userId, req.params.threadId);
   if (!thread) return res.status(404).json({ error: `no thread ${req.params.threadId}`, status: 404 });
+  // A Space that is not yours is a 404 here too, for the same reason: once the SSE headers are
+  // sent, a 200 is already on the wire and the failure can only be an `error` event.
+  if (body.data.spaceId && !(await findSpace(userId, body.data.spaceId))) {
+    return res.status(404).json({ error: `no space ${body.data.spaceId}`, status: 404 });
+  }
 
   const requestId = req.header(REQUEST_HEADER) ?? newId('req');
   const startedAt = Date.now();
@@ -215,7 +220,19 @@ app.post('/threads/:threadId/ask', async (req, res) => {
 
   openStream(res);
   try {
-    const run = await runQuickLoop(query, res, startedAt, state, { userId, threadId: thread._id }, history);
+    const run = await runQuickLoop(
+      query,
+      res,
+      startedAt,
+      state,
+      {
+        userId,
+        threadId: thread._id,
+        mode: body.data.mode,
+        spaceId: body.data.spaceId
+      },
+      history
+    );
     const dangling = unresolvedCitations(run.text, run.sources);
     if (dangling.length) log.warn({ requestId, dangling }, 'answer cites numbers that are not in sources');
     const cost = costUsd(state.usage, run.searchCalls);

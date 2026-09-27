@@ -1,6 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import type { Response } from 'express';
-import type { RunLog, Source, Terminated, ThreadMessage, TraceEvent } from '@lumina/contract';
+import type { AskMode, RunLog, Source, Terminated, ThreadMessage, TraceEvent } from '@lumina/contract';
 import { env, secrets } from './env.js';
 import { TOOL_SCHEMAS, fetchPage } from './tools.js';
 import { ProviderError } from './errors.js';
@@ -9,22 +9,26 @@ import { send } from './sse.js';
 import pino from 'pino';
 import { recallMemory, saveMemory, type Recalled } from './memory.js';
 import type { ModelUsage } from './cost.js';
+import { hybridSearchChunks, rrf, type ChunkHit } from './retrieval.js';
+import { documentTitles } from './documents.js';
 
 const log = pino({ level: env.logLevel });
 
 const client = new Anthropic({ apiKey: secrets.anthropic });
 
-const RESEARCH_SYSTEM = `You are the research phase of LUMINA, a web search assistant.
+const RESEARCH_SYSTEM = `You are the research phase of LUMINA, a search assistant.
 Your only job is to gather sources. Do not write an answer.
 
-Search results for the question may already be in the first message. If they are not, start with web_search.
-1. Call fetch_page on the 2 to 4 most relevant results. Only fetched pages can be cited later.
-2. Call web_search again only if those results clearly do not cover the question.
-3. When you have read enough, reply with the single word READY.
-4. If the user states a durable fact or preference about themselves, call save_memory with it once. If the user's message is only such a statement, save it and reply READY.`;
+Results for the question may already be in the first message. Which tools you have depends on where this question should be answered from: use what you were given and never assume a tool you cannot see.
+1. With web tools: call fetch_page on the 2 to 4 most relevant results. Only fetched pages can be cited later.
+2. With search_documents: the passages it returns are already citable and there is nothing to fetch. Call it again, worded differently, only if the passages clearly miss the question.
+3. Call web_search again only if the results clearly do not cover the question.
+4. When you have read enough, reply with the single word READY.
+5. If the user states a durable fact or preference about themselves, call save_memory with it once. If the user's message is only such a statement, save it and reply READY.`;
 
-const ANSWER_SYSTEM = `You are LUMINA, a web search assistant that answers with citations.
+const ANSWER_SYSTEM = `You are LUMINA, a search assistant that answers with citations.
 Write a concise answer (3 to 6 sentences) using ONLY the numbered sources below.
+The sources may be web pages, excerpts from the user's own documents, or both. A document excerpt is cited exactly like a web page: [n].
 Cite with [n] right after each claim, where n is a listed source number. Never cite a number that is not listed.
 Earlier turns of the conversation may precede the question. Use them to understand what the question refers to, but the citation numbers in earlier answers point at sources that are no longer listed: never reuse them.
 If the sources do not cover the question, say so plainly and cite nothing.
@@ -122,7 +126,29 @@ function pickSnippet(text: string, query: string): string {
   return best.slice(0, 300);
 }
 
-export type RunContext = { userId: string; threadId: string };
+export type RunContext = {
+  userId: string;
+  threadId: string;
+  /** Where to look. The router is this field plus toolsFor below, not a sentence in a prompt. */
+  mode: AskMode;
+  spaceId?: string;
+};
+
+/**
+ * The toolbelt the model actually sees. A mode="web" run cannot call search_documents because
+ * the schema is not in the list, and a run with no Space cannot call it because there is
+ * nothing to search. A prompt asking the model not to is a suggestion; a missing schema is a
+ * gate. Same argument that keeps plan_research away from a quick search (R2).
+ */
+function toolsFor(ctx: RunContext) {
+  const docs = ctx.mode !== 'web' && !!ctx.spaceId;
+  const web = ctx.mode !== 'docs';
+  return TOOL_SCHEMAS.filter((t) => {
+    if (t.name === 'search_documents') return docs;
+    if (t.name === 'web_search' || t.name === 'fetch_page') return web;
+    return true; // memory is available in every mode
+  });
+}
 
 export async function runQuickLoop(
   query: string,
@@ -144,6 +170,10 @@ export async function runQuickLoop(
   };
   let firstTokenAt = 0;
   const pages: Page[] = [];
+  const docLists: ChunkHit[][] = []; // one ranked list per search_documents call, fused below
+  const seenChunks = new Set<string>();
+  let docSearches = 0;
+  let staleDocSearch = false; // the last search_documents returned only chunks already seen
   const titles = new Map<string, string>();
   const recalled: Recalled[] = [];
   const deadline = Date.now() + env.maxWallClockSec * 1000;
@@ -186,6 +216,31 @@ export async function runQuickLoop(
           ? hits.map((m, i) => `${i + 1}. ${m.text}`).join('\n')
           : '(no memories yet)';
         return { output, note: `${hits.length} recalled` };
+      }
+
+      case 'search_documents': {
+        // Unreachable unless toolsFor let it through; a throw here is an honest ok:false, not silence.
+        if (!ctx.spaceId) throw new Error('search_documents needs a spaceId on the request');
+        const hits = await hybridSearchChunks(ctx.spaceId, ctx.userId, String(input.query));
+        docLists.push(hits);
+        docSearches++;
+        staleDocSearch = hits.length > 0 && hits.every((h) => seenChunks.has(h.id));
+        hits.forEach((h) => seenChunks.add(h.id));
+        // Filenames, not docIds: a doc_… id looks like something fetch_page can open, and the model tried.
+        const names = await documentTitles([...new Set(hits.map((h) => h.docId))]);
+        const output = hits.length
+          ? hits
+              .map((h, i) => {
+                const where = h.locator.page
+                  ? `, p. ${h.locator.page}`
+                  : h.locator.heading
+                    ? `, ${h.locator.heading}`
+                    : '';
+                return `${i + 1}. [${names.get(h.docId) ?? 'document'}${where}] ${h.text.slice(0, 300)}`;
+              })
+              .join('\n')
+          : '(no matching passages in this Space)';
+        return { output, note: `${hits.length} passages, hybrid${staleDocSearch ? ', nothing new' : ''}` };
       }
 
       case 'save_memory': {
@@ -237,20 +292,32 @@ export async function runQuickLoop(
   }
 
   // ---- phase 0: recall always runs here, as a harness step, because a model that forgets to
-  // recall is a memory feature that silently does not exist. On a fresh question it runs in
-  // parallel with the pre-search (see below); on a follow-up it runs alone, and the model makes
-  // the first search with the thread in view.
+  // recall is a memory feature that silently does not exist. The pre-retrieval call mirrors the
+  // router mode, so the model's first turn already has results from the right place.
   const recall = callTool('recall_memory', { query }, 'harness: what is known about this user');
+  const useWeb = ctx.mode !== 'docs';
+  const useDocs = ctx.mode !== 'web' && !!ctx.spaceId;
   let opening: string;
   if (history.length) {
     await recall;
     opening = `Earlier in this conversation:\n${historyText(history)}\n\nQuestion: ${query}\n\nThis is a follow-up. Search for it with the full topic spelled out.`;
   } else {
-    const [first] = await Promise.all([
-      callTool('web_search', { query }, 'harness pre-search: the question as typed'),
+    const [web, docs] = await Promise.all([
+      useWeb
+        ? callTool('web_search', { query }, `router: mode=${ctx.mode}, the question as typed`)
+        : undefined,
+      useDocs
+        ? callTool('search_documents', { query }, `router: mode=${ctx.mode}, space ${ctx.spaceId}`)
+        : undefined,
       recall
     ]);
-    opening = `Question: ${query}\n\nSearch results for the question as typed:\n${first.output}`;
+    opening = [
+      `Question: ${query}`,
+      web ? `Web results for the question as typed:\n${web.output}` : '',
+      docs ? `Passages from the user's own documents:\n${docs.output}` : ''
+    ]
+      .filter(Boolean)
+      .join('\n\n');
   }
   const known = memoryBlock(recalled);
   if (known) opening = `${known}\n\n${opening}`;
@@ -267,7 +334,7 @@ export async function runQuickLoop(
       model: env.llmModelResearch,
       max_tokens: 1024,
       system: RESEARCH_SYSTEM,
-      tools: TOOL_SCHEMAS,
+      tools: toolsFor(ctx),
       messages
     });
     log.debug(
@@ -319,23 +386,50 @@ export async function runQuickLoop(
     );
 
     messages.push({ role: 'user', content: results });
-    if (pages.length >= 2) break; // enough to answer from; do not spend a turn asking the model to say so
+    // Enough to answer from: two fetched pages; or, with no web half, a full set of passages; or the
+    // document side is exhausted — a search that found nothing new, or the search budget spent.
+    const docsDone = staleDocSearch || docSearches >= env.maxDocSearches;
+    if (pages.length >= 2 || (!useWeb && docLists.flat().length >= env.ragTopK) || docsDone) break;
   }
 
   // ---- between the phases: the sources exist now, and the contract wants them before any token.
-  const sources: Source[] = pages.map((p, i) => ({
-    n: i + 1,
-    kind: 'web',
-    title: p.title,
-    url: p.url,
-    snippet: pickSnippet(p.text, query)
-  }));
+  const docHits = rrf(docLists, env.ragTopK, env.rrfK);
+  const docTitles = await documentTitles([...new Set(docHits.map((h) => h.docId))]);
+  const sources: Source[] = [
+    ...pages.map((p, i) => ({
+      n: i + 1,
+      kind: 'web' as const,
+      title: p.title,
+      url: p.url,
+      snippet: pickSnippet(p.text, query)
+    })),
+    ...docHits.map((h, i) => ({
+      n: pages.length + i + 1,
+      kind: 'doc' as const,
+      title: docTitles.get(h.docId) ?? h.docId,
+      docId: h.docId,
+      locator: h.locator,
+      // The whole chunk, verbatim: for a document source the snippet IS the retrieved unit,
+      // and it is what both the grounding check and recall@5 read. A 300-char slice can cut
+      // the sentence the gold set is looking for.
+      snippet: h.text
+    }))
+  ];
   send(res, 'sources', sources);
 
-  // ---- phase 2: the answer. No tools at all, only the fetched pages, streamed as it is written.
-  const sourceBlock = pages.length
-    ? pages.map((p, i) => `[${i + 1}] ${p.title} — ${p.url}\n${p.text.slice(0, 4000)}`).join('\n\n')
-    : '(no sources were retrieved)';
+  // ---- phase 2: the answer. No tools at all, only what was retrieved, streamed as it is written.
+  const blocks = [
+    ...pages.map((p, i) => `[${i + 1}] ${p.title} — ${p.url}\n${p.text.slice(0, 4000)}`),
+    ...docHits.map((h, i) => {
+      const where = h.locator.page
+        ? `, p. ${h.locator.page}`
+        : h.locator.heading
+          ? `, ${h.locator.heading}`
+          : '';
+      return `[${pages.length + i + 1}] ${docTitles.get(h.docId) ?? h.docId}${where}\n${h.text.slice(0, 4000)}`;
+    })
+  ];
+  const sourceBlock = blocks.length ? blocks.join('\n\n') : '(no sources were retrieved)';
   const t1 = Date.now();
   const stream = client.messages.stream({
     model: env.llmModel,

@@ -78,6 +78,21 @@ export const TOOL_SCHEMAS = [
     }
   },
   {
+    name: 'search_documents',
+    description:
+      "Search the user's own uploaded documents in this Space. Returns the best-matching passages with their document and page. These passages are already readable in full — do NOT call fetch_page on them. Prefer this over the web when the question is about the user's documents.",
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        query: {
+          type: 'string',
+          description: 'What to look for, in the words likely to appear in the documents'
+        }
+      },
+      required: ['query']
+    }
+  },
+  {
     name: 'save_memory',
     description:
       'Remember one durable fact or preference the user stated about themselves (what they build in, how they want answers, their role). One sentence, in the third person. Never save trivia from search results, and never save something already listed under what you know about the user.',
