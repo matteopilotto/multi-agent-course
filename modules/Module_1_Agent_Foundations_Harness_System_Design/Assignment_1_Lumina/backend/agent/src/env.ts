@@ -31,6 +31,9 @@ export const env = {
   deepSubQuestionsMin: num(process.env.DEEP_SUB_QUESTIONS_MIN, 3),
   deepSubQuestionsMax: num(process.env.DEEP_SUB_QUESTIONS_MAX, 6),
   deepDailyCap: num(process.env.DEEP_DAILY_CAP, 5),
+  
+  // How many sub-questions research at once. The wall clock becomes the slowest wave, not the sum.
+  deepConcurrency: num(process.env.DEEP_CONCURRENCY, 3),
 
   // Jobs worker: how often it polls, when a `running` row counts as abandoned, how many tries a document gets.
   jobPollMs: num(process.env.JOB_POLL_MS, 1000),

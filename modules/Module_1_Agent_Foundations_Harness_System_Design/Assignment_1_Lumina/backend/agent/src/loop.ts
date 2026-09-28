@@ -49,6 +49,35 @@ const CAP_NOTE =
 
 type Page = { url: string; title: string; text: string };
 
+/** One question's research: its own conversation and what it found. Quick runs one; deep runs one per sub-question. */
+type Research = {
+  /** The sub-question index this research serves; undefined on a quick run. */
+  sq?: number;
+  query: string;
+  /** Its share of the run's tool calls, and how many it has made. */
+  budget: number;
+  calls: number;
+  /** This question's own tool calls, so the run log can list them together (see the fan-out). */
+  log: RunLog['toolCalls'];
+  pages: Page[];
+  docLists: ChunkHit[][]; // one ranked list per search_documents call, fused at source-build time
+  seenChunks: Set<string>;
+  docSearches: number;
+  staleDocSearch: boolean; // the last search_documents returned only chunks already seen
+};
+const newResearch = (query: string, budget: number, sq?: number): Research => ({
+  sq,
+  query,
+  budget,
+  calls: 0,
+  log: [],
+  pages: [],
+  docLists: [],
+  seenChunks: new Set(),
+  docSearches: 0,
+  staleDocSearch: false
+});
+
 /** Earlier turns, bounded: a long thread must not eat the token budget. */
 const HISTORY_MAX_TURNS = 6;
 const HISTORY_MAX_CHARS = 1500;
@@ -181,22 +210,24 @@ export async function runQuickLoop(
     usage[model] = bucket;
   };
   let firstTokenAt = 0;
-  const pages: Page[] = [];
-  const docLists: ChunkHit[][] = []; // one ranked list per search_documents call, fused below
-  const seenChunks = new Set<string>();
-  let docSearches = 0;
-  let staleDocSearch = false; // the last search_documents returned only chunks already seen
-  const titles = new Map<string, string>();
+  const titles = new Map<string, string>(); // shared: a URL has one title whichever search found it
   const recalled: Recalled[] = [];
-  const deadline = Date.now() + env.maxWallClockSec * 1000;
+  const maxCalls = ctx.depth === 'deep' ? env.maxToolCallsDeep : env.maxToolCalls;
+  const deadline = Date.now() + (ctx.depth === 'deep' ? env.maxWallClockSecDeep : env.maxWallClockSec) * 1000;
   let step = 0;
-  let terminated: Terminated = 'done';
+  let terminated = 'done' as Terminated; // `as`, not `: Terminated =`: researchOne assigns 'cap' from inside a closure, which narrowing cannot see
 
   /** TOOL_FUNCTIONS from agent_loop.py. Lives inside the loop so it can record what was fetched. */
   async function dispatch(
     name: string,
-    input: Record<string, unknown>
+    input: Record<string, unknown>,
+    research?: Research
   ): Promise<{ output: string; note?: string }> {
+    // Retrieval writes into one question's research; memory serves the whole run.
+    const own = () => {
+      if (!research) throw new Error(`${name} called outside a research context`);
+      return research;
+    };
     switch (name) {
       case 'web_search': {
         const { results, cached, note } = await cachedWebSearch(String(input.query));
@@ -209,14 +240,11 @@ export async function runQuickLoop(
       }
 
       case 'fetch_page': {
+        const { pages } = own();
         const url = String(input.url);
         const text = await fetchPage(url);
         if (!pages.some((p) => p.url === url)) {
-          pages.push({
-            url,
-            title: titles.get(url) ?? new URL(url).hostname,
-            text
-          });
+          pages.push({ url, title: titles.get(url) ?? new URL(url).hostname, text });
         }
         return { output: text };
       }
@@ -233,11 +261,12 @@ export async function runQuickLoop(
       case 'search_documents': {
         // Unreachable unless toolsFor let it through; a throw here is an honest ok:false, not silence.
         if (!ctx.spaceId) throw new Error('search_documents needs a spaceId on the request');
+        const r = own();
         const hits = await hybridSearchChunks(ctx.spaceId, ctx.userId, String(input.query));
-        docLists.push(hits);
-        docSearches++;
-        staleDocSearch = hits.length > 0 && hits.every((h) => seenChunks.has(h.id));
-        hits.forEach((h) => seenChunks.add(h.id));
+        r.docLists.push(hits);
+        r.docSearches++;
+        r.staleDocSearch = hits.length > 0 && hits.every((h) => r.seenChunks.has(h.id));
+        hits.forEach((h) => r.seenChunks.add(h.id));
         // Filenames, not docIds: a doc_… id looks like something fetch_page can open, and the model tried.
         const names = await documentTitles([...new Set(hits.map((h) => h.docId))]);
         const output = hits.length
@@ -252,7 +281,7 @@ export async function runQuickLoop(
               })
               .join('\n')
           : '(no matching passages in this Space)';
-        return { output, note: `${hits.length} passages, hybrid${staleDocSearch ? ', nothing new' : ''}` };
+        return { output, note: `${hits.length} passages, hybrid${r.staleDocSearch ? ', nothing new' : ''}` };
       }
 
       case 'save_memory': {
@@ -269,8 +298,10 @@ export async function runQuickLoop(
   async function callTool(
     name: TraceEvent['tool'],
     input: Record<string, unknown>,
-    reason?: string
+    reason?: string,
+    research?: Research
   ): Promise<{ output: string; error?: string }> {
+    if (research) research.calls += 1; // same synchronous moment as step, so a parallel burst counts in order
     step += 1;
     const thisStep = step; // captured now: parallel fetches would otherwise all report the last number
     const t0 = Date.now();
@@ -279,7 +310,7 @@ export async function runQuickLoop(
     let fatal: ProviderError | undefined;
     let note: string | undefined;
     try {
-      const r = await dispatch(name, input);
+      const r = await dispatch(name, input, research);
       output = r.output;
       note = r.note;
     } catch (e) {
@@ -295,10 +326,13 @@ export async function runQuickLoop(
       input,
       ok: !error,
       ms,
+      ...(research?.sq ? { subQuestion: research.sq } : {}),
       ...(why ? { reason: why } : {}),
       ...(error ? { error } : {})
     });
-    toolCalls.push({ name, ok: !error, ms, ...(error ? { error } : {}) });
+    const entry = { name, ok: !error, ms, ...(error ? { error } : {}) };
+    toolCalls.push(entry); // completion order, and pushed at once: a throw later still leaves it in the log
+    research?.log.push(entry); // the same object, so the fan-out can regroup it by sub-question
     if (fatal) throw fatal;
     return { output, error };
   }
@@ -334,114 +368,172 @@ export async function runQuickLoop(
     toolCalls.push({ name: 'plan_research', ok: true, ms });
   }
 
-  // ---- phase 0: recall always runs here, as a harness step, because a model that forgets to
-  // recall is a memory feature that silently does not exist. The pre-retrieval call mirrors the
-  // router mode, so the model's first turn already has results from the right place.
+  // ---- phase 0: recall once, as a harness step: memory is about the user, not about any one
+  // part of the question. Every research awaits the same promise.
   const recall = callTool('recall_memory', { query }, 'harness: what is known about this user');
   const useWeb = ctx.mode !== 'docs';
   const useDocs = ctx.mode !== 'web' && !!ctx.spaceId;
-  let opening: string;
-  if (history.length) {
-    await recall;
-    opening = `Earlier in this conversation:\n${historyText(history)}\n\nQuestion: ${query}\n\nThis is a follow-up. Search for it with the full topic spelled out.`;
-  } else {
-    const [web, docs] = await Promise.all([
-      useWeb
-        ? callTool('web_search', { query }, `router: mode=${ctx.mode}, the question as typed`)
-        : undefined,
-      useDocs
-        ? callTool('search_documents', { query }, `router: mode=${ctx.mode}, space ${ctx.spaceId}`)
-        : undefined,
-      recall
-    ]);
-    opening = [
-      `Question: ${query}`,
-      web ? `Web results for the question as typed:\n${web.output}` : '',
-      docs ? `Passages from the user's own documents:\n${docs.output}` : ''
-    ]
-      .filter(Boolean)
-      .join('\n\n');
-  }
-  const known = memoryBlock(recalled);
-  if (known) opening = `${known}\n\n${opening}`;
-  const messages: Anthropic.MessageParam[] = [{ role: 'user', content: opening }];
+  /** Set when any research throws: the other lanes finish their current turn and start nothing new. */
+  let stopped = false;
 
-  // A docs-only question whose pre-search already filled top-k leaves a research turn nothing to
-  // decide: there are no pages to pick, and the model only ever replied READY — a whole Haiku call
-  // (1.5–2.5 s measured) of TTFT for nothing. The price: save_memory is only reachable from a
-  // research turn, so a durable fact stated inside such a question is not saved.
-  const docsFull = () => !useWeb && docLists.flat().length >= env.ragTopK;
-  const skipResearch = !history.length && docsFull();
-  if (skipResearch) log.debug({ phase: 'research', skipped: true }, 'pre-search already has top-k');
-
-  // ---- phase 1: research. Tools on. Nothing streams but the trace.
-  while (!skipResearch) {
-    if (step >= env.maxToolCalls || Date.now() > deadline) {
+  /** Pre-search and research turns for one question: the question itself on quick, one sub-question on deep. */
+  async function researchOne(r: Research): Promise<void> {
+    if (step >= maxCalls || Date.now() > deadline) {
       terminated = 'cap';
-      break;
+      return;
     }
-    const t0 = Date.now();
-    const response = await client.messages.create({
-      model: env.llmModelResearch,
-      max_tokens: 1024,
-      system: RESEARCH_SYSTEM,
-      tools: toolsFor(ctx),
-      messages
-    });
-    log.debug(
-      { phase: 'research', ms: Date.now() - t0, inTokens: response.usage.input_tokens },
-      'model call'
-    );
+    // A planned sub-question is already spelled out; only a quick follow-up needs the thread to make sense.
+    const followUp = r.sq === undefined && history.length > 0;
+    const tag = r.sq ? `harness: sub-question ${r.sq}` : `router: mode=${ctx.mode}`;
+    let opening: string;
+    if (followUp) {
+      await recall;
+      opening = `Earlier in this conversation:\n${historyText(history)}\n\nQuestion: ${r.query}\n\nThis is a follow-up. Search for it with the full topic spelled out.`;
+    } else {
+      const [web, docs] = await Promise.all([
+        useWeb ? callTool('web_search', { query: r.query }, `${tag}, the question as typed`, r) : undefined,
+        useDocs
+          ? callTool('search_documents', { query: r.query }, `${tag}, space ${ctx.spaceId}`, r)
+          : undefined,
+        recall
+      ]);
+      opening = [
+        r.sq ? `This is one part of a larger question: ${query}` : '',
+        `Question: ${r.query}`,
+        web ? `Web results for the question as typed:\n${web.output}` : '',
+        docs ? `Passages from the user's own documents:\n${docs.output}` : ''
+      ]
+        .filter(Boolean)
+        .join('\n\n');
+    }
+    const known = memoryBlock(recalled);
+    if (known) opening = `${known}\n\n${opening}`;
+    const messages: Anthropic.MessageParam[] = [{ role: 'user', content: opening }];
+    // A sub-question never saves memory: four of them would save the same fact four times.
+    const tools = r.sq ? toolsFor(ctx).filter((t) => t.name !== 'save_memory') : toolsFor(ctx);
 
-    addUsage(env.llmModelResearch, response.usage);
-    messages.push({ role: 'assistant', content: response.content });
-    if (response.stop_reason !== 'tool_use') break;
+    const docsFull = () => !useWeb && r.docLists.flat().length >= env.ragTopK;
+    const skipResearch = !followUp && docsFull();
+    if (skipResearch)
+      log.debug({ phase: 'research', sq: r.sq, skipped: true }, 'pre-search already has top-k');
 
-    const toolBlocks = response.content.filter((b): b is Anthropic.ToolUseBlock => b.type === 'tool_use');
+    // ---- phase 1: research. Tools on. Nothing streams but the trace.
+    while (!skipResearch) {
+      if (stopped) break;
+      if (step >= maxCalls || Date.now() > deadline) {
+        terminated = 'cap';
+        break;
+      }
+      // This question's share is spent. Not a cap: the run has budget left, it is allocated to the others.
+      if (r.calls >= r.budget) break;
 
-    // A3: the model may ask for ten fetches in one turn. The harness runs at most
-    // env.maxSameToolInARow blocks of any one tool and refuses the rest, so a burst cannot
-    // outrun expectations.json's maxConsecutiveSameTool. The refusal is a tool_result with
-    // is_error, not silence: the model has to see why it got nothing back, and the API
-    // rejects the next turn unless every tool_use block is answered.
-    const seen = new Map<string, number>();
-    const results: Anthropic.ToolResultBlockParam[] = await Promise.all(
-      toolBlocks.map(async (block) => {
-        const nth = (seen.get(block.name) ?? 0) + 1;
-        seen.set(block.name, nth);
-        if (nth > env.maxSameToolInARow) {
-          // Never reaches callTool, so it is never traced, never counted, never billed.
-          // It still gets logged: a gate that fires silently is a gate you cannot debug.
-          log.warn(
-            {
-              tool: block.name,
-              asked: toolBlocks.filter((b) => b.name === block.name).length,
-              ran: env.maxSameToolInARow
-            },
-            'tool blocks refused: same tool too many times in one turn'
+      const t0 = Date.now();
+      const response = await client.messages.create({
+        model: env.llmModelResearch,
+        max_tokens: 1024,
+        system: RESEARCH_SYSTEM,
+        tools, // CHANGED: was toolsFor(ctx); a sub-question's toolbelt has no save_memory
+        messages
+      });
+      log.debug(
+        { phase: 'research', sq: r.sq, ms: Date.now() - t0, inTokens: response.usage.input_tokens },
+        'model call'
+      );
+
+      addUsage(env.llmModelResearch, response.usage);
+      messages.push({ role: 'assistant', content: response.content });
+      if (response.stop_reason !== 'tool_use') break;
+
+      const toolBlocks = response.content.filter((b): b is Anthropic.ToolUseBlock => b.type === 'tool_use');
+
+      // A3: at most env.maxSameToolInARow blocks of any one tool per turn. And at most what is left of
+      // this question's share: one turn asking for four fetches must not overdraw it. Refusals are
+      // tool_results with is_error, not silence: the model has to see why it got nothing back, and
+      // the API rejects the next turn unless every tool_use block is answered.
+      const seen = new Map<string, number>();
+      const remaining = r.budget - r.calls;
+      let admitted = 0; // counted synchronously in .map order, before any await, exactly like `seen`
+      const results: Anthropic.ToolResultBlockParam[] = await Promise.all(
+        toolBlocks.map(async (block) => {
+          const nth = (seen.get(block.name) ?? 0) + 1;
+          seen.set(block.name, nth);
+          const refusal =
+            nth > env.maxSameToolInARow
+              ? `At most ${env.maxSameToolInARow} ${block.name} calls per turn. Work with the results you already have, or ask for fewer.`
+              : admitted >= remaining
+                ? 'The tool budget for this question is spent. Work with the results you already have.'
+                : undefined;
+          if (refusal) {
+            // Never reaches callTool, so it is never traced, never counted, never billed.
+            // It still gets logged: a gate that fires silently is a gate you cannot debug.
+            log.warn({ tool: block.name, sq: r.sq, refusal }, 'tool block refused');
+            return {
+              type: 'tool_result' as const,
+              tool_use_id: block.id,
+              content: `ERROR: refused. ${refusal}`,
+              is_error: true
+            };
+          }
+          admitted++;
+          const { output, error } = await callTool(
+            block.name as TraceEvent['tool'],
+            block.input as Record<string, unknown>,
+            undefined,
+            r
           );
-          return {
-            type: 'tool_result' as const,
-            tool_use_id: block.id,
-            content: `ERROR: refused. At most ${env.maxSameToolInARow} ${block.name} calls per turn. Work with the results you already have, or ask for fewer.`,
-            is_error: true
-          };
-        }
+          return { type: 'tool_result' as const, tool_use_id: block.id, content: output, is_error: !!error };
+        })
+      );
 
-        const { output, error } = await callTool(
-          block.name as TraceEvent['tool'],
-          block.input as Record<string, unknown>
-        );
-        return { type: 'tool_result' as const, tool_use_id: block.id, content: output, is_error: !!error };
-      })
-    );
-
-    messages.push({ role: 'user', content: results });
-    // Enough to answer from: two fetched pages; or, with no web half, a full set of passages; or the
-    // document side is exhausted — a search that found nothing new, or the search budget spent.
-    const docsDone = staleDocSearch || docSearches >= env.maxDocSearches;
-    if (pages.length >= 2 || docsFull() || docsDone) break;
+      messages.push({ role: 'user', content: results });
+      // Enough to answer from: two fetched pages; or, with no web half, a full set of passages; or the
+      // document side is exhausted — a search that found nothing new, or the search budget spent.
+      const docsDone = r.staleDocSearch || r.docSearches >= env.maxDocSearches; // CHANGED: r.
+      if (r.pages.length >= 2 || docsFull() || docsDone) break; // CHANGED: r.pages
+    }
   }
+
+  // Split what is left of the run's budget evenly: without a share, sub-question 1 can spend what
+  // sub-question 6 needs, and 6 is answered from nothing. Quick is one research holding all of it.
+  const subQs = plan?.subQuestions ?? [];
+  const share = Math.floor((maxCalls - step) / Math.max(subQs.length, 1));
+  const researches = subQs.length
+    ? subQs.map((s) => newResearch(s.question, share, s.i))
+    : [newResearch(query, share)];
+
+  // Sub-questions are independent, so they run in parallel, at most env.deepConcurrency at a time.
+  // Every lane is awaited before the run ends, even after a failure: no research may still be
+  // writing to the stream when the route writes `error` and closes it.
+  let next = 0;
+  const lane = async () => {
+    while (!stopped && next < researches.length) {
+      const r = researches[next++] as Research; // read and bumped before any await: no two lanes take one
+      try {
+        await researchOne(r);
+      } catch (e) {
+        stopped = true;
+        throw e;
+      }
+    }
+  };
+  const lanes = Array.from({ length: Math.min(env.deepConcurrency, researches.length) }, lane);
+  const failed = (await Promise.allSettled(lanes)).find(
+    (s): s is PromiseRejectedResult => s.status === 'rejected'
+  );
+  if (failed) throw failed.reason;
+
+  // The run log lists each sub-question's calls together, in plan order; the trace keeps the real
+  // interleaving (step numbers, ms). Interleaved, three sub-questions fetching at once read as eight
+  // fetch_page in a row, and A3, a thrash guard for ONE line of reasoning, would fail a run that
+  // never thrashed. Harness steps (plan_research, recall_memory) stay first.
+  const fanned = new Set(researches.flatMap((r) => r.log));
+  const harnessCalls = toolCalls.filter((t) => !fanned.has(t));
+  toolCalls.splice(0, toolCalls.length, ...harnessCalls, ...researches.flatMap((r) => r.log));
+
+  // Naive until the merge step: flattened in plan order, no dedupe, no subQuestion on sources yet.
+  const pages = researches.flatMap((r) => r.pages);
+  const docLists = researches.flatMap((r) => r.docLists);
+  const known = memoryBlock(recalled);
 
   // ---- between the phases: the sources exist now, and the contract wants them before any token.
   const docHits = rrf(docLists, env.ragTopK, env.rrfK);
