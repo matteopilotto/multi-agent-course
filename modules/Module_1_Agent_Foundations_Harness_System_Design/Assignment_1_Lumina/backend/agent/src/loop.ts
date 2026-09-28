@@ -167,6 +167,16 @@ function pickSnippet(text: string, query: string): string {
 
 export type RunContext = {
   userId: string;
+/** Two spellings of one page are one source: no fragment, no trailing slash. */
+function urlKey(url: string): string {
+  try {
+    const u = new URL(url);
+    return `${u.protocol}//${u.host}${u.pathname.replace(/\/+$/, '')}${u.search}`;
+  } catch {
+    return url; // not a parseable URL: compare it as written
+  }
+}
+
   threadId: string;
   /** Where to look. The router is this field plus toolsFor below, not a sentence in a prompt. */
   mode: AskMode;
@@ -530,51 +540,78 @@ export async function runQuickLoop(
   const harnessCalls = toolCalls.filter((t) => !fanned.has(t));
   toolCalls.splice(0, toolCalls.length, ...harnessCalls, ...researches.flatMap((r) => r.log));
 
-  // Naive until the merge step: flattened in plan order, no dedupe, no subQuestion on sources yet.
-  const pages = researches.flatMap((r) => r.pages);
-  const docLists = researches.flatMap((r) => r.docLists);
   const known = memoryBlock(recalled);
 
-  // ---- between the phases: the sources exist now, and the contract wants them before any token.
-  const docHits = rrf(docLists, env.ragTopK, env.rrfK);
-  const docTitles = await documentTitles([...new Set(docHits.map((h) => h.docId))]);
-  const sources: Source[] = [
-    ...pages.map((p, i) => ({
-      n: i + 1,
-      kind: 'web' as const,
-      title: p.title,
-      url: p.url,
-      snippet: pickSnippet(p.text, query)
-    })),
-    ...docHits.map((h, i) => ({
-      n: pages.length + i + 1,
-      kind: 'doc' as const,
-      title: docTitles.get(h.docId) ?? h.docId,
-      docId: h.docId,
-      locator: h.locator,
-      // The whole chunk, verbatim: for a document source the snippet IS the retrieved unit,
-      // and it is what both the grounding check and recall@5 read. A 300-char slice can cut
-      // the sentence the gold set is looking for.
-      snippet: h.text
-    }))
-  ];
-  send(res, 'sources', sources);
-
-  // ---- phase 2: the answer. No tools at all, only what was retrieved, streamed as it is written.
-  const blocks = [
-    ...pages.map((p, i) => `[${i + 1}] ${p.title} — ${p.url}\n${p.text.slice(0, 4000)}`),
-    ...docHits.map((h, i) => {
+  // ---- the merge: one citation numbering across every research. Walk the researches in plan
+  // order; the first to find a source owns it (the planner puts the most important sub-question
+  // first) and later finds of it are dropped. n is assigned as a source is accepted, so the
+  // numbering is contiguous from 1 by construction.
+  // Documents are fused PER research: one rrf over every sub-question's lists would cap a whole deep
+  // run at ragTopK passages and forget which sub-question found each one.
+  const fused = researches.map((r) => ({ r, docHits: rrf(r.docLists, env.ragTopK, env.rrfK) }));
+  const docTitles = await documentTitles([...new Set(fused.flatMap((f) => f.docHits.map((h) => h.docId)))]);
+  /** A source, and the text the answer model reads under its number. */
+  const merged: { source: Source; body: string }[] = [];
+  const taken = new Set<string>();
+  for (const { r, docHits } of fused) {
+    const tag = r.sq ? { subQuestion: r.sq } : {};
+    for (const p of r.pages) {
+      const key = `web:${urlKey(p.url)}`;
+      if (taken.has(key)) continue;
+      taken.add(key);
+      merged.push({
+        source: {
+          n: merged.length + 1,
+          kind: 'web',
+          title: p.title,
+          url: p.url,
+          snippet: pickSnippet(p.text, r.query), // against the sub-question, not the whole question
+          ...tag
+        },
+        body: `${p.title} — ${p.url}\n${p.text.slice(0, 4000)}`
+      });
+    }
+    for (const h of docHits) {
+      // The chunk, not docId + locator: a long page is several chunks, and merging two of them
+      // under one number would leave a snippet that matches neither verbatim.
+      const key = `chunk:${h.id}`;
+      if (taken.has(key)) continue;
+      taken.add(key);
+      const title = docTitles.get(h.docId) ?? h.docId;
       const where = h.locator.page
         ? `, p. ${h.locator.page}`
         : h.locator.heading
           ? `, ${h.locator.heading}`
           : '';
-      return `[${pages.length + i + 1}] ${docTitles.get(h.docId) ?? h.docId}${where}\n${h.text.slice(0, 4000)}`;
-    })
-  ];
+      merged.push({
+        source: {
+          n: merged.length + 1,
+          kind: 'doc',
+          title,
+          docId: h.docId,
+          locator: h.locator,
+          // The whole chunk, verbatim: for a document source the snippet IS the retrieved unit,
+          // and it is what both the grounding check and recall@5 read. A 300-char slice can cut
+          // the sentence the gold set is looking for.
+          snippet: h.text,
+          ...tag
+        },
+        body: `${title}${where}\n${h.text.slice(0, 4000)}`
+      });
+    }
+  }
+
+  // ---- between the phases: the sources exist now, and the contract wants them before any token.
+  const sources = merged.map((m) => m.source);
+  send(res, 'sources', sources);
+
+  // ---- phase 2: the answer. No tools at all, only what was retrieved, streamed as it is written.
+  // Built from the same list as `sources`, so [n] here is n in the sources event by construction.
+  const blocks = merged.map((m) => `[${m.source.n}] ${m.body}`);
   const sourceBlock = blocks.length ? blocks.join('\n\n') : '(no sources were retrieved)';
   const t1 = Date.now();
   const stream = client.messages.stream({
+
     model: env.llmModel,
     max_tokens: 1024,
     system: [ANSWER_SYSTEM, terminated === 'cap' ? CAP_NOTE : '', known, `SOURCES:\n${sourceBlock}`]
