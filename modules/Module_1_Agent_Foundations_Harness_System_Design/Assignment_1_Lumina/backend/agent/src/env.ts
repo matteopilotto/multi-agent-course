@@ -31,9 +31,12 @@ export const env = {
   deepSubQuestionsMin: num(process.env.DEEP_SUB_QUESTIONS_MIN, 3),
   deepSubQuestionsMax: num(process.env.DEEP_SUB_QUESTIONS_MAX, 6),
   deepDailyCap: num(process.env.DEEP_DAILY_CAP, 5),
-  
+
   // How many sub-questions research at once. The wall clock becomes the slowest wave, not the sum.
   deepConcurrency: num(process.env.DEEP_CONCURRENCY, 3),
+
+  // The deep answer is a section per sub-question, not 3-6 sentences: it needs room, but a ceiling.
+  deepAnswerMaxTokens: num(process.env.DEEP_ANSWER_MAX_TOKENS, 2500),
 
   // Jobs worker: how often it polls, when a `running` row counts as abandoned, how many tries a document gets.
   jobPollMs: num(process.env.JOB_POLL_MS, 1000),

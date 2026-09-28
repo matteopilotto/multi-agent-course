@@ -44,6 +44,23 @@ Earlier turns of the conversation may precede the question. Use them to understa
 If the sources do not cover the question, say so plainly and cite nothing.
 If you know things about the user, let their preferences shape the answer (for example, code first when they prefer code). If the user only told you something about themselves rather than asking, confirm in one sentence what you will remember and cite nothing.`;
 
+/**
+ * Deep only. The provided UI renders the answer as plain text (pre-wrap; only [n] becomes a chip),
+ * so the structure is blank lines and numbered heading lines, never markdown: a "##" would show as "##".
+ */
+const DEEP_ANSWER_SYSTEM = `You are LUMINA in deep-search mode. The user's question was split into sub-questions, each was researched separately, and the numbered sources below are grouped under the sub-question that found them.
+Write a structured answer using ONLY those sources, as plain text (no markdown: no #, no **, no tables), in exactly this shape:
+
+1. The direct answer: 2 to 4 sentences that answer the user's question as asked. If it asks for a decision, give one and say what it hinges on.
+2. One section per sub-question, in the listed order. Each starts on its own line with the sub-question's number, a middle dot, and a short title of a few words (for example "2 · Operational burden"), then 2 to 5 sentences. If that sub-question's sources do not answer it, write one sentence saying so instead of filling the section.
+3. A last section headed "What is still unknown": 1 to 3 lines starting with "- ", each naming a specific gap in THIS answer: a sub-question the sources left thin, sources that disagree (cite both), or figures that may be out of date. Never generic caveats such as "it depends on your needs" or "consult an expert".
+
+Separate the parts with a blank line.
+Cite with [n] right after each claim, where n is a listed source number. A section may cite any listed source, not only those grouped under it. Never cite a number that is not listed, and never state a fact no source supports.
+Every sentence must carry a fact, a comparison, or a judgement the sources support. Longer is not better.
+Earlier turns of the conversation may precede the question. The citation numbers in earlier answers point at sources that are no longer listed: never reuse them.
+If you know things about the user, let their preferences shape the answer.`;
+
 const CAP_NOTE =
   'Tool budget exhausted. Answer now with what you have, and say plainly what you could not verify.';
 
@@ -610,13 +627,33 @@ export async function runQuickLoop(
   // ---- phase 2: the answer. No tools at all, only what was retrieved, streamed as it is written.
   // Built from the same list as `sources`, so [n] here is n in the sources event by construction.
   const blocks = merged.map((m) => `[${m.source.n}] ${m.body}`);
-  const sourceBlock = blocks.length ? blocks.join('\n\n') : '(no sources were retrieved)';
+  // Deep: the same blocks, grouped under the sub-question that found them, so each section of the
+  // answer knows its own evidence. The numbering is untouched: grouping only reorders the prompt,
+  // and merged is already in plan order.
+  const sourceBlock = !blocks.length
+    ? '(no sources were retrieved)'
+    : plan
+      ? plan.subQuestions
+          .map((s) => {
+            const own = merged
+              .filter((m) => m.source.subQuestion === s.i)
+              .map((m) => `[${m.source.n}] ${m.body}`);
+            return `=== Sub-question ${s.i}: ${s.question}\n${own.length ? own.join('\n\n') : '(nothing new was found for this sub-question)'}`;
+          })
+          .join('\n\n')
+      : blocks.join('\n\n');
 
+  const maxTokens = plan ? env.deepAnswerMaxTokens : 1024;
   const t1 = Date.now();
   const stream = client.messages.stream({
     model: env.llmModel,
-    max_tokens: 1024,
-    system: [ANSWER_SYSTEM, terminated === 'cap' ? CAP_NOTE : '', known, `SOURCES:\n${sourceBlock}`]
+    max_tokens: maxTokens,
+    system: [
+      plan ? DEEP_ANSWER_SYSTEM : ANSWER_SYSTEM,
+      terminated === 'cap' ? CAP_NOTE : '',
+      known,
+      `SOURCES:\n${sourceBlock}`
+    ]
       .filter(Boolean)
       .join('\n\n'),
     messages: [...historyMessages(history), { role: 'user', content: query }]
@@ -630,10 +667,18 @@ export async function runQuickLoop(
   });
   const final = await stream.finalMessage();
   addUsage(env.llmModel, final.usage);
+  // Not a cap (the research finished), but an answer cut mid-sentence must not pass silently either.
+  if (final.stop_reason === 'max_tokens') {
+    log.warn(
+      { depth: ctx.depth, maxTokens, outTokens: final.usage.output_tokens },
+      'answer cut off at max_tokens'
+    );
+  }
   const text = final.content
     .filter((b) => b.type === 'text')
     .map((b) => b.text)
     .join('');
+
   const searchCalls = providerSearchCalls(state);
   const searchCached = searchHits.length > 0 && searchHits.every(Boolean); // every search was a hit, and there was at least one
   const ttftMs = (firstTokenAt || Date.now()) - startedAt;
