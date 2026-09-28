@@ -39,7 +39,9 @@ to talk to, and the agent service is never reachable from it.
 
 The gateway never sees an API key. Its only jobs are checking the user header, request ids,
 logging, validation, the per-user rate limit, and passing requests and streams through to the
-agent service.
+agent service. The rate limit counts only asks and uploads, the two routes that spend money.
+Reads cost almost nothing, and the UI and the bench both poll them every second or so, so
+counting them would lock out a user for watching an upload index.
 
 The agent service is the only component that holds API keys and calls Anthropic, Tavily, and
 OpenAI. It is also the only one that decides a request has gone over its limits: the tool-call
@@ -68,17 +70,23 @@ shows the error.
 Fly's private network so no API key ever sits on a public host. The gateway passes the body,
 `X-User-Id`, and `X-Request-Id` through unchanged, which is why one request id appears in both
 services' logs. Requests that fail at the gateway never reach the agent: missing user header is
-`401`, bad body is `400`, over the rate limit is `429`. On `/ask` the gateway relays each SSE
+`401`, bad body is `400`, over the rate limit is `429`. Refusals the agent makes before a stream
+opens, an unknown thread or the deep-search cap, come back as plain JSON and the gateway passes
+them on unchanged. On `/ask` the gateway relays each SSE
 event to the browser the moment it arrives, with no buffering. If the agent is unreachable
 before the stream starts, the gateway returns `502` and `/health` says `degraded`. If the agent
 dies mid-stream, the gateway sends an `error` SSE event to the browser and closes the
 connection, because the `200` and the headers are already sent and a status code can no longer
-carry the failure.
+carry the failure. It relays whole SSE frames only, so its own `error` event never lands inside
+a half-sent one, and a stream that closes without a `done` or an `error` event is reported as an
+error too: a stream that just stops is not a finished answer.
 
 **Agent service and worker to MongoDB.** Both use the Mongo driver with one pooled connection
 per process. If Mongo is unreachable, an in-flight ask fails loud with `502`, the agent's
-`/health` reports `db: down`, and the worker keeps polling and finds nothing until Mongo is
-back.
+`/health` reports `db: down`, and the worker logs each failed poll and keeps polling, waiting a
+little longer each time up to 30 seconds, until Mongo is back. The first version did not keep
+that promise: one failed poll ended the worker process, and I only found out because an upload
+sat at `pending` with nothing saying why.
 
 **HTTP process to worker.** They never talk directly. The upload handler writes a `pending`
 document row and a `pending` job row and returns `202` at once. The worker polls the `jobs`
@@ -86,7 +94,10 @@ collection every second, claims a job atomically, and writes its progress into t
 row, which the browser polls through `GET /spaces/{id}/documents`. The queue is what lets the
 upload handler answer in under 300 ms, and it is what survives a crash: if no worker is running, the
 document stays `pending` and nothing is lost; if a worker dies mid-job, a sweeper returns the
-stale `running` row to `pending`.
+stale `running` row to `pending`. Nothing being lost is not the same as someone knowing, so the
+worker also writes a heartbeat to Mongo every 5 seconds, and the agent's `/health` reads the
+newest one. After 15 seconds without a beat it reports `worker: down` and `status: degraded`,
+still with a `200`: asks keep working, so this is a partial outage, not a dead agent.
 
 **Agent service and worker to providers.** The agent calls Anthropic, Tavily, and OpenAI over
 HTTPS. The worker calls only OpenAI, for embeddings. When a provider throws inside the agent,
@@ -97,11 +108,11 @@ document, where the next poll finds it.
 
 ## State
 
-Everything durable lives in one MongoDB Atlas cluster, in ten collections plus a GridFS bucket
-for the raw uploads. Every document carries the `userId` it belongs to, and the agent service
-and the worker are the only writers. The gateway stores nothing.
+Everything durable lives in one MongoDB Atlas cluster, in eleven collections plus a GridFS bucket
+for the raw uploads. Every user's document carries the `userId` it belongs to, and the agent
+service and the worker are the only writers. The gateway stores nothing durable.
 
-The collections fall into four buckets, sorted by what happens if you delete them.
+The collections fall into five buckets, sorted by what happens if you delete them.
 
 | Bucket | Collections | If deleted |
 |---|---|---|
@@ -109,12 +120,18 @@ The collections fall into four buckets, sorted by what happens if you delete the
 | Cache | `searchCache` | Nothing breaks. The next search misses, calls Tavily, and refills the row. Mongo already expires rows on its own through a TTL index, so the system is built to run with holes in it. |
 | Derived | `chunks` | Document search goes empty until every document is reset to `pending` and re-indexed. Rebuildable from GridFS, but not on its own, and the user notices in the meantime. |
 | Evidence | `requests`, `runs` | The product works the same. `/stats` drops to zero and the grader has nothing to read. |
+| Liveness | `workers` | Nothing is lost. `/health` calls the worker down until its next heartbeat, at most 5 seconds later. |
 
 Who owns what: the agent service's HTTP process owns threads, messages, memories, spaces, the
 search cache, and the request and run records. The upload handler creates a document row and its
-job row. From then on the worker owns that document's status and everything in `chunks`. The
-in-process LRU in front of `searchCache` is the one piece of state that lives outside Mongo, and
-it is a pure cache: it is empty on every restart and refills from the collection.
+job row. From then on the worker owns that document's status and everything in `chunks`, and each
+worker process owns its own heartbeat row in `workers`.
+
+Three pieces of state live outside Mongo, in memory, and all three are lost on a restart. The LRU
+in front of `searchCache` is a pure cache and refills from the collection. The agent's in-flight
+deep-search reservations and the gateway's per-user rate-limit buckets are counters: a restart
+forgets them, which costs at most a few extra requests, and a second machine would need them in
+a shared store before they meant anything across machines.
 
 The consistency story for uploads is the one place where "written" and "visible" are not the
 same thing. Atlas Search indexes are eventually consistent: when the worker inserts a chunk,
@@ -164,3 +181,13 @@ and one fewer thing that can silently not be running. I chose the separate proce
 failure it prevents, a stalled upload with no error, is the kind that nobody notices until a
 user complains. If it turns out to be more operational cost than it is worth, it is a small
 change to move the loop into a thread.
+
+The worry came true in development before the first deploy. The worker process died on one
+failed Mongo poll, the agent kept answering questions, and an upload sat at `pending` with
+nothing anywhere saying why. The isolation did its job, since the crash never reached an answer,
+but it also made the crash silent. A separate process needs its own way to be seen, so the fix
+was two changes, not one: the poll loop now survives a failed poll, and the heartbeat puts a
+dead worker on `/health` within 15 seconds. What the heartbeat still cannot see is a worker that
+is alive but stuck: a call that never returns keeps the timer beating, and the sweeper cannot
+rescue the job because it runs inside that same stuck loop. That is the gap I would close next,
+with a timeout on every provider call the worker makes.
