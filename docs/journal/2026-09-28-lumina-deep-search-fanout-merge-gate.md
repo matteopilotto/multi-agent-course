@@ -169,3 +169,69 @@ missed. It had numbered plain-text sections and no markdown.
 
 **ADR candidates:** the deep answer's structure is plain text because the provided UI does not
 render markdown.
+
+---
+
+# 2026-09-28 (evening) — the cut-off was default thinking
+
+## Goal
+Diagnose why the first structured deep answer stopped mid-sentence ("No source g") and still
+reported `done`, then fix it.
+
+## Context
+The "(later)" section above left this open, with a guess that hidden thinking used the
+`max_tokens` budget. The warning added in `a9e58d6` was the first evidence.
+
+## What was done
+- **The agent log** (from my terminal): `"depth":"deep","maxTokens":2500,"outTokens":2500,"msg":"answer
+  cut off at max_tokens"`. It was a real `max_tokens` stop.
+- **Counted the streamed text** with `countTokens`: 1,385 tokens (585 words). I compared it with
+  the stored message: 4,064 characters, identical. About 1,100 billed tokens were not text,
+  and none were lost in the stream. Verified.
+- **Probed the model twice.** A trivial two-sentence prompt returned only a `text` block (96
+  tokens). The real deep prompt, rebuilt from the saved plan and sources, returned `thinking,text`
+  by default and `text` only with `thinking: { type: 'disabled' }` (1,301 vs 1,171 out tokens,
+  both `end_turn`). Verified, one call each.
+- **`e059fa6`**: `thinking: { type: 'disabled' }` on the answer call in `loop.ts`, both gears.
+  Claude applied it at my request; typecheck clean.
+- **`d22660f`**: progress file.
+
+Re-run, one run each, same question, temporary agent on :8001:
+
+| | TTFT before → after | cost before → after | answer |
+|---|---|---|---|
+| deep | 26.1 s → 12.3 s | $0.153 → $0.121 | complete, no cut-off warning, Sonnet out 1,325 |
+| quick | 13.7 s → 6.8 s | $0.034 → $0.025 | complete |
+
+The planner produced a different plan on the re-run, so the answers do not compare section by
+section. Read once, the deep answer kept its verdict, its sections, and its specific unknowns.
+It said plainly that sub-question 4's sources did not answer it.
+
+## Decisions
+- **Disable thinking rather than raise `max_tokens`.** Both were on the table. The harness has
+  already planned, and this call only writes from sources it was given. Thinking also sits in
+  front of the first token, and quick has a 2.5 s TTFT SLA.
+- **Keep the 2,500 ceiling and the warning.** Without thinking, a 4-section answer needed about
+  1,300 tokens, which leaves about 2× headroom, and a future cut still gets logged.
+
+## Dead ends
+- **The trivial probe pointed the wrong way.** It showed no thinking, and I briefly treated the
+  hypothesis as refuted. Thinking depends on the prompt; only the real prompt settled it.
+- **The first probe script failed with `ERR_MODULE_NOT_FOUND`.** It lived in `/tmp`, and Node
+  resolves a bare import from the importing file's directory. The fix was to write it inside
+  `backend/agent` and delete it afterwards.
+
+## Learnings
+- **Compare what was billed, what streamed, and what was stored.** That three-way check separated
+  "lost in the stream" from "generated as something other than text" in two commands.
+- **A model default can change the harness's contract with the provider.** Nothing in `src/`
+  asked for thinking, yet it cost budget, money and TTFT.
+
+## Open questions and next steps
+- Quick TTFT is 6.8 s against 2.5 s. The rest is the research phase and Atlas latency.
+- `pickSnippet` returns navigation text on some pages.
+- Deep search is done as code; its SLA numbers need `bench.mjs`, which needs the gateway. Next:
+  the gateway.
+
+**ADR candidates:** the answer call runs with thinking disabled, because planning is the
+harness's job and the answer's TTFT is an SLA.
