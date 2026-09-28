@@ -411,30 +411,33 @@ export async function runQuickLoop(
       terminated = 'cap';
       return;
     }
-    // A planned sub-question is already spelled out; only a quick follow-up needs the thread to make sense.
+    // A planned sub-question is already spelled out; only a quick question in a thread may lean on it.
     const followUp = r.sq === undefined && history.length > 0;
     const tag = r.sq ? `harness: sub-question ${r.sq}` : `router: mode=${ctx.mode}`;
-    let opening: string;
-    if (followUp) {
-      await recall;
-      opening = `Earlier in this conversation:\n${historyText(history)}\n\nQuestion: ${r.query}\n\nThis is a follow-up. Search for it with the full topic spelled out.`;
-    } else {
-      const [web, docs] = await Promise.all([
-        useWeb ? callTool('web_search', { query: r.query }, `${tag}, the question as typed`, r) : undefined,
-        useDocs
-          ? callTool('search_documents', { query: r.query }, `${tag}, space ${ctx.spaceId}`, r)
-          : undefined,
-        recall
-      ]);
-      opening = [
-        r.sq ? `This is one part of a larger question: ${query}` : '',
-        `Question: ${r.query}`,
-        web ? `Web results for the question as typed:\n${web.output}` : '',
-        docs ? `Passages from the user's own documents:\n${docs.output}` : ''
-      ]
-        .filter(Boolean)
-        .join('\n\n');
-    }
+    // The question as typed is searched first even in a thread: it is the only search string that is
+    // the same every time the question is asked, so it is the one the cache can serve. Skipping it
+    // whenever the thread had history made every repeat depend on the model rewording its search the
+    // same way twice (12.5% hits on the first full bench). The thread still reaches the model, so a
+    // real follow-up ("and its price?") searches again with the topic spelled out.
+    const [web, docs] = await Promise.all([
+      useWeb ? callTool('web_search', { query: r.query }, `${tag}, the question as typed`, r) : undefined,
+      useDocs
+        ? callTool('search_documents', { query: r.query }, `${tag}, space ${ctx.spaceId}`, r)
+        : undefined,
+      recall
+    ]);
+    let opening = [
+      followUp ? `Earlier in this conversation:\n${historyText(history)}` : '',
+      r.sq ? `This is one part of a larger question: ${query}` : '',
+      `Question: ${r.query}`,
+      web ? `Web results for the question as typed:\n${web.output}` : '',
+      docs ? `Passages from the user's own documents:\n${docs.output}` : '',
+      followUp
+        ? 'If the question only makes sense with the earlier turns and these results miss its topic, search again with the full topic spelled out. Otherwise work with these results.'
+        : ''
+    ]
+      .filter(Boolean)
+      .join('\n\n');
     const known = memoryBlock(recalled);
     if (known) opening = `${known}\n\n${opening}`;
     const messages: Anthropic.MessageParam[] = [{ role: 'user', content: opening }];
