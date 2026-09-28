@@ -10,3 +10,5 @@ One entry per session, in `docs/journal/YYYY-MM-DD-short-title.md`.
 - [2026-09-17 — LUMINA: Spaces, the jobs worker, and what the failure tests found](docs/journal/2026-09-17-lumina-spaces-jobs-worker.md)
 - [2026-09-17 — LUMINA: the thrash guard, `/stats`, and a bill that can be checked](docs/journal/2026-09-17-lumina-thrash-guard-stats-cost.md)
 - [2026-09-27 — LUMINA: hybrid retrieval tested through `/ask`, and where TTFT goes](docs/journal/2026-09-27-lumina-hybrid-smoke-test-ttft.md)
+- [2026-09-27 — LUMINA: the deep-search planner, and an async route that killed the agent](docs/journal/2026-09-27-lumina-deep-search-planner.md)
+- [2026-09-28 — LUMINA: deep search fan-out, merged citations, `depth` wired through, and the spend gate](docs/journal/2026-09-28-lumina-deep-search-fanout-merge-gate.md)
