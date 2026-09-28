@@ -648,6 +648,10 @@ export async function runQuickLoop(
   const stream = client.messages.stream({
     model: env.llmModel,
     max_tokens: maxTokens,
+    // Sonnet 5 thinks by default on a hard prompt: those tokens count toward max_tokens and never stream
+    // as text. Measured: ~1,100 of them cut a 1,385-token deep answer at 2,500, and they sit in front of
+    // the first token. The harness already planned; this call only writes from sources it was given.
+    thinking: { type: 'disabled' },
     system: [
       plan ? DEEP_ANSWER_SYSTEM : ANSWER_SYSTEM,
       terminated === 'cap' ? CAP_NOTE : '',
