@@ -1,4 +1,4 @@
-# 2026-09-28 — LUMINA: deep search fan-out, merged citations, `depth` wired through, and the spend gate
+# 2026-09-28 — LUMINA: deep search fan-out, merged citations, `depth` wired through, the spend gate, and the structured answer
 
 ## Goal
 Finish deep search's machinery (SPEC §5.5, build order step 10): research each sub-question,
@@ -100,3 +100,72 @@ left no user turn.
 turn; the run log is ordered per sub-question while the trace keeps real order; document sources
 dedupe on chunk id rather than docId+locator; the deep spend gate reserves in-process before
 counting, released only after the requests row is written.
+
+---
+
+# 2026-09-28 (later) — the structured answer, and a cut-off it exposed
+
+## Goal
+Close the two items still open on deep search, one at a time. First, the structured answer
+(SPEC §5.5 Should, and what the 5-point human "deep quality" row reads). Second, confirming the
+graded numbers, which needs the bench and therefore the gateway.
+
+## Context
+- Before starting I listed what was left. Every deep-search Must is built. The docs-only A3 risk
+  does not affect the bench, because its deep workload uses `mode: 'web'` (`bench.mjs:546`).
+- The answer model still used quick's "3 to 6 sentences" prompt and `max_tokens: 1024`.
+
+## What was done
+- **`a9e58d6`**: `DEEP_ANSWER_SYSTEM` in `loop.ts` (direct answer with a verdict → one section per
+  sub-question → "What is still unknown"). Deep sources are grouped under the sub-question that
+  found them. `max_tokens` is `env.deepAnswerMaxTokens` (`DEEP_ANSWER_MAX_TOKENS`, 2500), and a
+  `stop_reason === 'max_tokens'` answer is logged.
+- Typecheck clean and the `.env.example` line present. Verified; I ran these myself.
+
+One run each, same question ("should a small team self-host Postgres or use a managed service?"):
+
+| gear | latency | TTFT | cost | out tokens (run) | sources |
+|---|---|---|---|---|---|
+| quick | 18.3 s | 13.7 s | $0.034 | 720 | 3 cited |
+| deep | 39.9 s | 26.1 s | $0.153 | 3781 | 14 |
+
+Read side by side, deep was better, not only longer (verified, one reading). It had a verdict,
+concrete figures (RDS ~$266 vs EC2 ~$98/month), a practitioner counterview, and a point quick
+missed. It had numbered plain-text sections and no markdown.
+
+## Decisions
+- **Plain text, not markdown.** The provided UI renders the answer `pre-wrap` and only turns `[n]`
+  into chips (`styles.css:184`, `AnswerText.tsx:18`). A `##` would show as `##`.
+- **Quick keeps its prompt**, because quick's latency and cost SLAs depend on it.
+- **Group sources by sub-question with the numbering untouched.** Each section knows its
+  evidence, and any section may still cite any `[n]`.
+- **"What is still unknown" must name specific gaps.** The rubric's sample scorecard docks a
+  boilerplate one.
+- **`max_tokens` is configuration, and a cut is logged, not a cap**, because the research
+  finished. The value 2500: *rationale not discussed*.
+- **Committed with the cut-off unresolved**, at my request. The commit message states it.
+
+## Dead ends
+- **The auto-mode safety check returned no verdict** on every Bash and subagent call for
+  several turns. I ran the verification myself. The commit waited until I switched to manual
+  permissions.
+
+## Learnings
+- **Read the provided UI before designing output.** The markdown answer I would have asked for
+  would have rendered as symbols.
+- **The grounding check cannot see a mis-described source.** The unknowns section called [7]
+  (Fly.io) a "self-host is manageable" source, while section 2 correctly quoted it for the
+  managed side. The snippet exists, so the check passes.
+
+## Open questions and next steps
+- **The deep answer was cut mid-sentence** ("No source g") at about 700 visible words, about
+  1,000 tokens, well under 2500. The hypothesis is that thinking tokens count toward `max_tokens`
+  without streaming. Proposed, unverified: the `answer cut off at max_tokens` log line and its
+  `outTokens` will decide.
+- Quick TTFT was 13.7 s against a 2.5 s SLA (earlier today 4.8–5.6 s). One run, cause unknown.
+- `pickSnippet` returned navigation text for sources [8], [9] and [12].
+- The progress file is deliberately not updated until the cut-off is fixed.
+- Then item 2: the bench numbers, which need the gateway.
+
+**ADR candidates:** the deep answer's structure is plain text because the provided UI does not
+render markdown.
