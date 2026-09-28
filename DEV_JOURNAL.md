@@ -12,3 +12,4 @@ One entry per session, in `docs/journal/YYYY-MM-DD-short-title.md`.
 - [2026-09-27 — LUMINA: hybrid retrieval tested through `/ask`, and where TTFT goes](docs/journal/2026-09-27-lumina-hybrid-smoke-test-ttft.md)
 - [2026-09-27 — LUMINA: the deep-search planner, and an async route that killed the agent](docs/journal/2026-09-27-lumina-deep-search-planner.md)
 - [2026-09-28 — LUMINA: deep search fan-out, merged citations, `depth` wired through, the spend gate, and the structured answer](docs/journal/2026-09-28-lumina-deep-search-fanout-merge-gate.md)
+- [2026-09-28 (late evening) — LUMINA: the gateway, and a worker that died without a word](docs/journal/2026-09-28-lumina-deep-search-fanout-merge-gate.md)

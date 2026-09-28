@@ -235,3 +235,88 @@ It said plainly that sub-question 4's sources did not answer it.
 
 **ADR candidates:** the answer call runs with thinking disabled, because planning is the
 harness's job and the answer's TTFT is an SLA.
+
+# 2026-09-28 (late evening) — the gateway, and a worker that died without a word
+
+## Goal
+Build the gateway (Part 2): the browser's only way in, and the path `bench.mjs` and the deploy
+both need. Then fix the worker crash the UI test exposed.
+
+## Context
+The gateway had been deferred for six sessions. The skeleton came with CORS, the request id,
+pino, `/health` and static `web/dist`, and every other route returned 501. The agent already
+returned its own 401, 404 and deep-cap 429.
+
+## What was done
+- **`5d1e55d`, the gateway** (`backend/gateway/src/index.ts`, `env.ts`), in seven steps. I applied
+  each edit and Claude checked it:
+  - `requireUser` is registered from the contract's `ROUTES` table, placed after `cors()`.
+    Verified 401 / 501 / 200 / preflight 204.
+  - `validate(schema)` gives a 400 with the zod message, and the parsed body replaces the raw
+    one. Verified on five bad bodies.
+  - `proxy('json' | 'stream')` relays the agent's answer untouched; uploads are streamed through.
+    Verified 201/200/404/204 and 202, plus 400/404 relayed from the agent. A throwaway gateway
+    pointed at a dead port returned a 502 and survived.
+  - `askStream` handles SSE. Verified: events arrived trace ×5 → sources → token ×64 → done, and
+    `runs/req_gw_test1.json` shows the request id reached the agent. A fake agent tested three
+    endings: normal, dies mid-frame, and closes without `done`. All three correct.
+  - A token-bucket rate limit, on ask and upload only. Verified with a throwaway gateway at
+    3/min: three through, then 429 with `Retry-After: 20`; reads never limited; buckets per user;
+    refilled after 21 s.
+  - The UI then showed "404 Not Found": Vite reads `.env` from `web/`, so `VITE_API_URL` was
+    empty and the UI was POSTing to itself. Fixed with a git-ignored `web/.env.local`.
+    Afterwards I ran the full UI checklist in the browser and everything passed (my report,
+    not seen by Claude).
+- **`57a041c`, the worker.** An upload sat at `pending`: `tsx watch src/worker.ts` was alive with
+  no child process. Claude reproduced a crash with a throwaway worker pointed at an unreachable
+  Mongo. `pingDb()` swallows its failure, then the first `sweepStaleJobs()` rejects out of
+  `void main()` and Node exits. My actual crash output was never captured, so this cause is
+  inferred.
+  - Step 1 (mine): each pass is caught and backs off, `2^n` up to a 30 s cap;
+    `main().catch` → `fatal`. Verified against a real Wi-Fi outage, then a new upload reached
+    `indexed` in 8 s.
+  - Step 2 (Claude, at my request): a 5 s heartbeat into `workers`; `/health` reports
+    `degraded` with a 200 after 15 s without a beat, and the gateway keeps the agent's own
+    status. Verified: stopped → `degraded`/`down`/200, restarted → `ok`.
+- **`c111ed1`, DESIGN.md**, written by Claude in my voice at my request: eleven collections,
+  three pieces of in-memory state, and trade-off #4's worry, which came true.
+
+## Decisions
+- **Only whole SSE frames are relayed.** A half-written frame followed by our own `error`
+  would reach the browser as broken JSON.
+- **A stream that closes without `done` counts as an error.** A stream that just stops isn't
+  a finished answer.
+- **Rate limit on ask and upload only.** The bench counts a 429 as an error (budget 1 %), and
+  both the UI and the bench poll documents.
+- **Heartbeat on a timer, not once per pass.** A long job must not look dead. The known limit:
+  it proves the worker is alive, not that it is progressing.
+- **A dead worker gives `degraded` with a 200.** A 503 would make Fly and the bench treat the
+  whole agent as down.
+- **Validation forwards the parsed body.** That way the defaults are applied at the edge.
+  Other alternatives were not discussed.
+
+## Dead ends
+- **The first 502 said "agent unreachable" when the gateway itself had thrown.** My `env.ts`
+  edit was missing (`AbortSignal.timeout(undefined)`), and `tsx watch` never typechecks.
+  The message is now "agent request failed".
+- **`echo … > web/.env.local` never wrote the file.** I ran it from the wrong directory.
+  Claude's `cd ../..` instruction had also broken a curl test earlier.
+- **Blaming my `worker.ts` edit for the agent's death**, and then an agent restart. Both were
+  falsified by touching files while a per-second liveness monitor ran.
+
+## Learnings
+- **An error message must claim only what it knows.**
+- **A watcher that stays alive hides a dead process.** `concurrently -k` saw nothing.
+- **Nothing lost is not the same as someone knowing.** The queue kept the job, but no one could
+  see the worker was dead.
+
+## Open questions and next steps
+- **Unexplained:** the agent also had no child after the first Wi-Fi test. It didn't reproduce.
+- **Open:** 202 takes ~385 ms against 300 ms (one measurement), and a quick run's wall clock was
+  14.9 s against 12 s (one run).
+- Commits `bde1097` and `4f7c379` came from the bench session that followed. That session isn't
+  recorded here.
+
+**ADR candidates:** relaying whole SSE frames and treating a close without `done` as an error ·
+rate-limiting only the routes that spend · worker liveness by a heartbeat in Mongo, reported as
+`degraded` with a 200.
