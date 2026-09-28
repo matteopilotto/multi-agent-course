@@ -65,3 +65,21 @@ export async function sweepStaleJobs(): Promise<{ requeued: number; failed: numb
   });
   return { requeued: requeued.modifiedCount, failed: failed.modifiedCount };
 }
+
+/**
+ * Worker liveness. The agent cannot see the worker's process (a separate machine on Fly), so
+ * the worker writes a beat here and /health reads the newest one. Not in the contract's
+ * COLLECTIONS (a provided package), hence the local name. One row per worker process; the
+ * newest beat is the one that counts, so rows left by crashed processes are harmless.
+ */
+type WorkerBeat = { _id: string; beatAt: Date };
+const workers = async () => (await db()).collection<WorkerBeat>('workers');
+
+export async function heartbeat(workerId: string): Promise<void> {
+  await (await workers()).updateOne({ _id: workerId }, { $set: { beatAt: new Date() } }, { upsert: true });
+}
+
+export async function lastHeartbeat(): Promise<Date | null> {
+  const [row] = await (await workers()).find().sort({ beatAt: -1 }).limit(1).toArray();
+  return row?.beatAt ?? null;
+}

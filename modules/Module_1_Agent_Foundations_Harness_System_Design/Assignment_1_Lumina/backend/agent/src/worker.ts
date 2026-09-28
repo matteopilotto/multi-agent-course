@@ -9,7 +9,7 @@ import pino from 'pino';
 import type { ChunkDoc, JobDoc } from '@lumina/contract';
 import { env } from './env.js';
 import { pingDb } from './db.js';
-import { claimJob, completeJob, failJob, sweepStaleJobs } from './jobs.js';
+import { claimJob, completeJob, failJob, heartbeat, sweepStaleJobs } from './jobs.js';
 import { findDocument, readUpload, setDocumentStatus } from './documents.js';
 import { parseDocument } from './ingest.js';
 import { embedMany } from './embed.js';
@@ -139,20 +139,49 @@ async function runOne(job: JobDoc): Promise<void> {
   }
 }
 
+/** Backoff ceiling while Mongo (or anything in one pass) keeps failing. */
+const MAX_BACKOFF_MS = 30_000;
+
+/**
+ * Liveness on its own timer, not per loop pass: a job may legitimately run for minutes, and a
+ * busy worker must not look dead. It proves the process is alive, not that the loop progresses.
+ */
+const HEARTBEAT_MS = 5_000;
+const beat = () =>
+  heartbeat(workerId).catch((err: unknown) => log.warn({ err }, 'heartbeat failed'));
+
+/**
+ * One pass per iteration, and no pass may end the process: a rejected sweep or claim used to
+ * escape `void main()` and exit, leaving `tsx watch` alive with no worker under it and every
+ * upload silently `pending`. DESIGN.md promises the worker keeps polling until Mongo is back;
+ * this loop is that promise. A job interrupted mid-way stays `running` and the sweeper returns
+ * it to `pending` after JOB_STALE_MS, so recovery needs the loop alive, not special cases.
+ */
 async function main(): Promise<void> {
   log.info(
     { workerId, pollMs: env.jobPollMs, staleMs: env.jobStaleMs, db: await pingDb() },
     'jobs worker up'
   );
+  void beat();
+  setInterval(beat, HEARTBEAT_MS).unref();
+  let failures = 0;
   while (!stopping) {
-    const swept = await sweepStaleJobs();
-    if (swept.requeued || swept.failed) log.warn(swept, 'stale running jobs swept');
-    const job = await claimJob(workerId);
-    if (!job) {
-      await sleep(env.jobPollMs);
-      continue;
+    try {
+      const swept = await sweepStaleJobs();
+      if (swept.requeued || swept.failed) log.warn(swept, 'stale running jobs swept');
+      const job = await claimJob(workerId);
+      failures = 0;
+      if (!job) {
+        await sleep(env.jobPollMs);
+        continue;
+      }
+      await runOne(job);
+    } catch (err) {
+      failures++;
+      const backoffMs = Math.min(env.jobPollMs * 2 ** failures, MAX_BACKOFF_MS);
+      log.error({ err, failures, backoffMs }, 'poll failed, the worker keeps polling');
+      await sleep(backoffMs);
     }
-    await runOne(job);
   }
   log.info('jobs worker stopped');
   process.exit(0);
@@ -165,4 +194,8 @@ for (const sig of ['SIGINT', 'SIGTERM'] as const) {
   });
 }
 
-void main();
+// Anything that still escapes is a state nobody planned for: say so, and stop with a non-zero code.
+main().catch((err: unknown) => {
+  log.fatal({ err }, 'jobs worker crashed');
+  process.exit(1);
+});

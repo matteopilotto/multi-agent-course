@@ -72,6 +72,7 @@ import {
 import { costUsd } from './cost.js';
 import { env } from './env.js';
 import { pingDb } from './db.js';
+import { lastHeartbeat } from './jobs.js';
 import { openStream, send } from './sse.js';
 import { providerSearchCalls, runQuickLoop, newRunState } from './loop.js';
 import { recordRequest, recordRun } from './runlog.js';
@@ -111,16 +112,23 @@ const safe =
 
 // ---------------------------------------------------------------- /health (implemented)
 
+/** Three missed beats. A dead worker means uploads never index: degraded, not down. */
+const WORKER_STALE_MS = 15_000;
+
 app.get('/health', async (_req, res) => {
-  const dbStatus = await pingDb();
-  const body: HealthResponse = {
-    status: dbStatus === 'ok' ? 'ok' : 'degraded',
+  const [dbStatus, beatAt] = await Promise.all([pingDb(), lastHeartbeat().catch(() => null)]);
+  const workerStatus: 'ok' | 'down' =
+    beatAt && Date.now() - beatAt.getTime() < WORKER_STALE_MS ? 'ok' : 'down';
+  const body: HealthResponse & { worker: { status: 'ok' | 'down'; lastBeatAt: string | null } } = {
+    status: dbStatus === 'ok' && workerStatus === 'ok' ? 'ok' : 'degraded',
     model: env.llmModel,
     searchProvider: env.searchProvider,
     vectorStore: env.vectorBackend,
     db: dbStatus,
-    ai: { status: 'ok' }
+    ai: { status: 'ok' },
+    worker: { status: workerStatus, lastBeatAt: beatAt?.toISOString() ?? null }
   };
+  // A dead worker is a partial outage: 200, so Fly and the bench do not take the agent for dead.
   res.status(dbStatus === 'ok' ? 200 : 503).json(body);
 });
 

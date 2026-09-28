@@ -175,9 +175,12 @@ app.post('/spaces', validate(CreateSpaceBody));
 
 app.get('/health', async (_req, res) => {
   let ai: { status: 'ok' | 'down' } & Record<string, unknown> = { status: 'down' };
+  // The agent's own verdict (e.g. degraded for a dead worker), kept apart from reachability.
+  let agentStatus: unknown;
   try {
     const upstream = await fetch(`${env.agentUrl}/health`, { signal: AbortSignal.timeout(3000) });
     const body = (await upstream.json()) as Record<string, unknown>;
+    agentStatus = body.status;
     ai = { ...body, status: upstream.ok ? 'ok' : 'down' };
   } catch (err) {
     // Health tells the truth about a dead dependency. It never pretends.
@@ -185,7 +188,7 @@ app.get('/health', async (_req, res) => {
   }
 
   const body: HealthResponse = {
-    status: ai.status === 'ok' ? 'ok' : 'degraded',
+    status: ai.status === 'ok' && agentStatus !== 'degraded' ? 'ok' : 'degraded',
     model: String(ai.model ?? 'unset'),
     searchProvider: (ai.searchProvider as HealthResponse['searchProvider']) ?? 'tavily',
     vectorStore: (ai.vectorStore as HealthResponse['vectorStore']) ?? 'atlas-vector-search',
