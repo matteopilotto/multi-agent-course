@@ -18,6 +18,9 @@ export const env = {
     .map((s) => s.trim())
     .filter(Boolean),
   rateLimitPerMinute: num(process.env.RATE_LIMIT_PER_MINUTE, 30),
+  /** JSON routes only; the ask stream gets no timeout, deep search legitimately runs minutes. */
+  agentTimeoutMs: num(process.env.AGENT_TIMEOUT_MS, 30000),
+
   logLevel: process.env.LOG_LEVEL ?? 'info',
   /** Serve the built UI from the gateway in production so one host serves / and /evals. */
   webDist: resolve(process.cwd(), '../../web/dist')
