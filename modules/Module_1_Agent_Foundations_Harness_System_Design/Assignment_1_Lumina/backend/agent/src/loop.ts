@@ -140,6 +140,8 @@ export type LoopResult = {
   searchCalls: number;
   ttftMs: number;
   searchCached: boolean;
+  /** The plan a deep run researched; undefined on quick. */
+  plan?: PlanEvent;
 };
 
 /** The paragraph of a fetched page most related to the query, verbatim, so the grounding check can find it. */
@@ -165,8 +167,6 @@ function pickSnippet(text: string, query: string): string {
   return best.slice(0, 300);
 }
 
-export type RunContext = {
-  userId: string;
 /** Two spellings of one page are one source: no fragment, no trailing slash. */
 function urlKey(url: string): string {
   try {
@@ -177,6 +177,8 @@ function urlKey(url: string): string {
   }
 }
 
+export type RunContext = {
+  userId: string;
   threadId: string;
   /** Where to look. The router is this field plus toolsFor below, not a sentence in a prompt. */
   mode: AskMode;
@@ -609,9 +611,9 @@ export async function runQuickLoop(
   // Built from the same list as `sources`, so [n] here is n in the sources event by construction.
   const blocks = merged.map((m) => `[${m.source.n}] ${m.body}`);
   const sourceBlock = blocks.length ? blocks.join('\n\n') : '(no sources were retrieved)';
+
   const t1 = Date.now();
   const stream = client.messages.stream({
-
     model: env.llmModel,
     max_tokens: 1024,
     system: [ANSWER_SYSTEM, terminated === 'cap' ? CAP_NOTE : '', known, `SOURCES:\n${sourceBlock}`]
@@ -635,5 +637,5 @@ export async function runQuickLoop(
   const searchCalls = providerSearchCalls(state);
   const searchCached = searchHits.length > 0 && searchHits.every(Boolean); // every search was a hit, and there was at least one
   const ttftMs = (firstTokenAt || Date.now()) - startedAt;
-  return { text, terminated, sources, searchCalls, searchCached, ttftMs };
+  return { text, terminated, sources, searchCalls, searchCached, ttftMs, plan };
 }

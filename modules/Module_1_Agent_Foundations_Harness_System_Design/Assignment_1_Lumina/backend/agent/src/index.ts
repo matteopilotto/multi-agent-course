@@ -108,7 +108,6 @@ const safe =
     h(req, res).catch(next);
   };
 
-
 // ---------------------------------------------------------------- /health (implemented)
 
 app.get('/health', async (_req, res) => {
@@ -137,219 +136,251 @@ app.get('/stats', async (req, res) => {
 /** The gateway will reject a missing header before it gets here; the agent still refuses, because every row needs an owner. */
 const userIdOf = (req: express.Request): string | undefined => req.header(USER_HEADER)?.trim() || undefined;
 
-app.post('/threads', safe(async (req, res) => {
-  const userId = userIdOf(req);
-  if (!userId) return res.status(401).json({ error: `missing ${USER_HEADER}`, status: 401 });
-  const body = CreateThreadBody.safeParse(req.body ?? {});
-  if (!body.success) return res.status(400).json({ error: body.error.message, status: 400 });
-  const threadId = await createThread(userId, body.data.title);
-  res.status(201).json({ threadId });
-}));
+app.post(
+  '/threads',
+  safe(async (req, res) => {
+    const userId = userIdOf(req);
+    if (!userId) return res.status(401).json({ error: `missing ${USER_HEADER}`, status: 401 });
+    const body = CreateThreadBody.safeParse(req.body ?? {});
+    if (!body.success) return res.status(400).json({ error: body.error.message, status: 400 });
+    const threadId = await createThread(userId, body.data.title);
+    res.status(201).json({ threadId });
+  })
+);
 
-app.get('/threads', safe(async (req, res) => {
-  const userId = userIdOf(req);
-  if (!userId) return res.status(401).json({ error: `missing ${USER_HEADER}`, status: 401 });
-  res.json({ threads: await listThreads(userId) });
-}));
+app.get(
+  '/threads',
+  safe(async (req, res) => {
+    const userId = userIdOf(req);
+    if (!userId) return res.status(401).json({ error: `missing ${USER_HEADER}`, status: 401 });
+    res.json({ threads: await listThreads(userId) });
+  })
+);
 
-app.get('/threads/:threadId', safe<{ threadId: string }>(async (req, res) => {
-  const userId = userIdOf(req);
-  if (!userId) return res.status(401).json({ error: `missing ${USER_HEADER}`, status: 401 });
-  const thread = await findThread(userId, req.params.threadId);
-  if (!thread) return res.status(404).json({ error: `no thread ${req.params.threadId}`, status: 404 });
-  res.json({ threadId: thread._id, title: thread.title, messages: await threadMessages(thread._id) });
-}));
+app.get(
+  '/threads/:threadId',
+  safe<{ threadId: string }>(async (req, res) => {
+    const userId = userIdOf(req);
+    if (!userId) return res.status(401).json({ error: `missing ${USER_HEADER}`, status: 401 });
+    const thread = await findThread(userId, req.params.threadId);
+    if (!thread) return res.status(404).json({ error: `no thread ${req.params.threadId}`, status: 404 });
+    res.json({ threadId: thread._id, title: thread.title, messages: await threadMessages(thread._id) });
+  })
+);
 
 // ---------------------------------------------------------------- POST /threads/:threadId/ask
 
-app.post('/threads/:threadId/ask', safe<{ threadId: string }>(async (req, res) => {
-  const userId = userIdOf(req);
-  if (!userId) return res.status(401).json({ error: `missing ${USER_HEADER}`, status: 401 });
-  const body = AskBody.safeParse(req.body);
-  if (!body.success) return res.status(400).json({ error: body.error.message, status: 400 });
-  // Before the stream opens: a status code can still carry the failure here, not after.
-  const thread = await findThread(userId, req.params.threadId);
-  if (!thread) return res.status(404).json({ error: `no thread ${req.params.threadId}`, status: 404 });
-  // A Space that is not yours is a 404 here too, for the same reason: once the SSE headers are
-  // sent, a 200 is already on the wire and the failure can only be an `error` event.
-  if (body.data.spaceId && !(await findSpace(userId, body.data.spaceId))) {
-    return res.status(404).json({ error: `no space ${body.data.spaceId}`, status: 404 });
-  }
-
-  const requestId = req.header(REQUEST_HEADER) ?? newId('req');
-  const startedAt = Date.now();
-  const state = newRunState();
-  const query = body.data.query;
-  const logBase = () => ({
-    tokens: state.tokens.in + state.tokens.out,
-    wallClockSec: (Date.now() - startedAt) / 1000,
-    depth: 'quick' as const,
-    toolCalls: state.toolCalls
-  });
-
-  const route = 'POST /threads/:threadId/ask';
-  /**
-   * The evidence: a runs row (plus the local file) and a requests row. Written after the
-   * response is committed, so a failure here is logged and never thrown: the status code
-   * has already left the building.
-   */
-  const record = async (terminated: Terminated, cost: number, status: number, answerId?: string) => {
-    const createdAt = new Date();
-    const run: RunDoc = {
-      ...logBase(),
-      costUsd: cost,
-      terminated,
-      requestId,
-      userId,
-      threadId: thread._id,
-      query,
-      ...(answerId ? { answerId } : {}),
-      createdAt
-    };
-    const request: RequestDoc = {
-      requestId,
-      userId,
-      route,
-      status,
-      ms: Date.now() - startedAt,
-      tokensIn: state.tokens.in,
-      tokensOut: state.tokens.out,
-      costUsd: cost,
-      toolCalls: state.toolCalls.length,
-      terminated,
-      depth: 'quick',
-      createdAt
-    };
-    try {
-      await Promise.all([recordRun(run), recordRequest(request)]);
-    } catch (err) {
-      log.error({ requestId, err }, 'evidence write failed: runs/requests rows missing for this answer');
+app.post(
+  '/threads/:threadId/ask',
+  safe<{ threadId: string }>(async (req, res) => {
+    const userId = userIdOf(req);
+    if (!userId) return res.status(401).json({ error: `missing ${USER_HEADER}`, status: 401 });
+    const body = AskBody.safeParse(req.body);
+    if (!body.success) return res.status(400).json({ error: body.error.message, status: 400 });
+    // Before the stream opens: a status code can still carry the failure here, not after.
+    const thread = await findThread(userId, req.params.threadId);
+    if (!thread) return res.status(404).json({ error: `no thread ${req.params.threadId}`, status: 404 });
+    // A Space that is not yours is a 404 here too, for the same reason: once the SSE headers are
+    // sent, a 200 is already on the wire and the failure can only be an `error` event.
+    if (body.data.spaceId && !(await findSpace(userId, body.data.spaceId))) {
+      return res.status(404).json({ error: `no space ${body.data.spaceId}`, status: 404 });
     }
-  };
 
-  // Read the history BEFORE appending this turn, or the question shows up twice.
-  const history = await threadMessages(thread._id);
-  // The user turn and the title are writes nothing reads until the next request, so they run
-  // alongside the planner instead of in front of it: two M0 round trips off deep's time to plan.
-  // Awaited before `done`, because `done` promises a follow-up will see this turn.
-  const saved = Promise.all([
-    appendMessage({ threadId: thread._id, userId, role: 'user', content: query, sources: [] }),
-    titleFromFirstQuery(thread._id, query)
-  ]);
-  saved.catch(() => {}); // marks it handled so Node does not exit; the real await below still throws
+    const requestId = req.header(REQUEST_HEADER) ?? newId('req');
+    const startedAt = Date.now();
+    const state = newRunState();
+    const query = body.data.query;
+    // The gear requested is the gear that runs: the server never upgrades, and a failed plan throws
+    // instead of downgrading. So it is read here, once, and the error path logs it too — a deep run
+    // that failed still spent deep money and still counts toward the daily cap.
+    const depth = body.data.depth;
 
-  openStream(res);
-  try {
-    const run = await runQuickLoop(
-      query,
-      res,
-      startedAt,
-      state,
-      {
+    const logBase = () => ({
+      tokens: state.tokens.in + state.tokens.out,
+      wallClockSec: (Date.now() - startedAt) / 1000,
+      depth: depth,
+      toolCalls: state.toolCalls
+    });
+
+    const route = 'POST /threads/:threadId/ask';
+    /**
+     * The evidence: a runs row (plus the local file) and a requests row. Written after the
+     * response is committed, so a failure here is logged and never thrown: the status code
+     * has already left the building.
+     */
+    const record = async (terminated: Terminated, cost: number, status: number, answerId?: string) => {
+      const createdAt = new Date();
+      const run: RunDoc = {
+        ...logBase(),
+        costUsd: cost,
+        terminated,
+        requestId,
         userId,
         threadId: thread._id,
-        mode: body.data.mode,
-        depth: body.data.depth,
-        spaceId: body.data.spaceId
-      },
-      history
-    );
-    const dangling = unresolvedCitations(run.text, run.sources);
-    if (dangling.length) log.warn({ requestId, dangling }, 'answer cites numbers that are not in sources');
-    const cost = costUsd(state.usage, run.searchCalls);
-    const done: DoneEvent = {
-      answerId: newId('ans'),
-      latencyMs: Date.now() - startedAt,
-      ttftMs: run.ttftMs,
-      model: env.llmModel,
-      tokens: state.tokens,
-      costUsd: cost,
-      searchCached: run.searchCached,
-      terminated: run.terminated,
-      depth: 'quick'
-    };
-    // Authoritative state first: `done` promises a follow-up will see this turn. The user turn
-    // lands before the answer, and a failed write ends the run here instead of behind a `done`.
-    await saved;
-    await appendMessage({
-      threadId: thread._id,
-      userId,
-      role: 'assistant',
-      content: run.text,
-      sources: run.sources,
-      answerId: done.answerId,
-      done
-    });
-    send(res, 'done', done);
-    log.info(
-      {
+        query,
+        ...(answerId ? { answerId } : {}),
+        createdAt
+      };
+      const request: RequestDoc = {
         requestId,
+        userId,
+        route,
+        status,
+        ms: Date.now() - startedAt,
+        tokensIn: state.tokens.in,
+        tokensOut: state.tokens.out,
+        costUsd: cost,
         toolCalls: state.toolCalls.length,
-        terminated: run.terminated,
+        terminated,
+        depth: depth,
+        createdAt
+      };
+      try {
+        await Promise.all([recordRun(run), recordRequest(request)]);
+      } catch (err) {
+        log.error({ requestId, err }, 'evidence write failed: runs/requests rows missing for this answer');
+      }
+    };
+
+    // Read the history BEFORE appending this turn, or the question shows up twice.
+    const history = await threadMessages(thread._id);
+    // The user turn and the title are writes nothing reads until the next request, so they run
+    // alongside the planner instead of in front of it: two M0 round trips off deep's time to plan.
+    // Awaited before `done`, because `done` promises a follow-up will see this turn.
+    const saved = Promise.all([
+      appendMessage({ threadId: thread._id, userId, role: 'user', content: query, sources: [] }),
+      titleFromFirstQuery(thread._id, query)
+    ]);
+    saved.catch(() => {}); // marks it handled so Node does not exit; the real await below still throws
+
+    openStream(res);
+    try {
+      const run = await runQuickLoop(
+        query,
+        res,
+        startedAt,
+        state,
+        {
+          userId,
+          threadId: thread._id,
+          mode: body.data.mode,
+          depth: body.data.depth,
+          spaceId: body.data.spaceId
+        },
+        history
+      );
+      const dangling = unresolvedCitations(run.text, run.sources);
+      if (dangling.length) log.warn({ requestId, dangling }, 'answer cites numbers that are not in sources');
+      const cost = costUsd(state.usage, run.searchCalls);
+      const done: DoneEvent = {
+        answerId: newId('ans'),
+        latencyMs: Date.now() - startedAt,
+        ttftMs: run.ttftMs,
+        model: env.llmModel,
         tokens: state.tokens,
-        usage: state.usage, // the per-model split the bill was computed from
         costUsd: cost,
         searchCached: run.searchCached,
-        ttftMs: run.ttftMs,
-        latencyMs: done.latencyMs
-      },
-      'answer'
-    );
-    await record(run.terminated, cost, 200, done.answerId);
-  } catch (e) {
-    const cost = costUsd(state.usage, providerSearchCalls(state));
-    log.error(
-      {
-        requestId,
-        err: e,
-        toolCalls: state.toolCalls.length,
-        terminated: 'error',
-        tokens: state.tokens,
-        costUsd: cost
-      },
-      'ask failed'
-    );
-    send(res, 'error', { status: 502, error: e instanceof Error ? e.message : String(e) });
-    await record('error', cost, 502);
-  }
-  res.end();
-}));
+        terminated: run.terminated,
+        depth,
+        subQuestions: run.plan?.subQuestions.length ?? 0
+      };
+      // Authoritative state first: `done` promises a follow-up will see this turn. The user turn
+      // lands before the answer, and a failed write ends the run here instead of behind a `done`.
+      await saved;
+      await appendMessage({
+        threadId: thread._id,
+        userId,
+        role: 'assistant',
+        content: run.text,
+        sources: run.sources,
+        answerId: done.answerId,
+        done,
+        ...(run.plan ? { subQuestions: run.plan.subQuestions } : {}) // the plan, so the answer stays explainable
+      });
+      send(res, 'done', done);
+      log.info(
+        {
+          requestId,
+          toolCalls: state.toolCalls.length,
+          terminated: run.terminated,
+          depth,
+          tokens: state.tokens,
+          usage: state.usage, // the per-model split the bill was computed from
+          costUsd: cost,
+          searchCached: run.searchCached,
+          ttftMs: run.ttftMs,
+          latencyMs: done.latencyMs
+        },
+        'answer'
+      );
+      await record(run.terminated, cost, 200, done.answerId);
+    } catch (e) {
+      const cost = costUsd(state.usage, providerSearchCalls(state));
+      log.error(
+        {
+          requestId,
+          err: e,
+          toolCalls: state.toolCalls.length,
+          terminated: 'error',
+          tokens: state.tokens,
+          costUsd: cost
+        },
+        'ask failed'
+      );
+      send(res, 'error', { status: 502, error: e instanceof Error ? e.message : String(e) });
+      await record('error', cost, 502);
+    }
+    res.end();
+  })
+);
 
 // ---------------------------------------------------------------- GET /memory · DELETE /memory/:memoryId
 
-app.get('/memory', safe(async (req, res) => {
-  const userId = userIdOf(req);
-  if (!userId) return res.status(401).json({ error: `missing ${USER_HEADER}`, status: 401 });
-  const body: ListMemoryResponse = { memories: await listMemories(userId) };
-  res.json(body);
-}));
+app.get(
+  '/memory',
+  safe(async (req, res) => {
+    const userId = userIdOf(req);
+    if (!userId) return res.status(401).json({ error: `missing ${USER_HEADER}`, status: 401 });
+    const body: ListMemoryResponse = { memories: await listMemories(userId) };
+    res.json(body);
+  })
+);
 
-app.delete('/memory/:memoryId', safe<{ memoryId: string }>(async (req, res) => {
-  const userId = userIdOf(req);
-  if (!userId) return res.status(401).json({ error: `missing ${USER_HEADER}`, status: 401 });
-  const gone = await deleteMemory(userId, req.params.memoryId);
-  if (!gone) return res.status(404).json({ error: `no memory ${req.params.memoryId}`, status: 404 });
-  res.status(204).end();
-}));
+app.delete(
+  '/memory/:memoryId',
+  safe<{ memoryId: string }>(async (req, res) => {
+    const userId = userIdOf(req);
+    if (!userId) return res.status(401).json({ error: `missing ${USER_HEADER}`, status: 401 });
+    const gone = await deleteMemory(userId, req.params.memoryId);
+    if (!gone) return res.status(404).json({ error: `no memory ${req.params.memoryId}`, status: 404 });
+    res.status(204).end();
+  })
+);
 
 // ---------------------------------------------------------------- POST /spaces · GET /spaces
 
-app.post('/spaces', safe(async (req, res) => {
-  const userId = userIdOf(req);
-  if (!userId) return res.status(401).json({ error: `missing ${USER_HEADER}`, status: 401 });
-  const body = CreateSpaceBody.safeParse(req.body ?? {});
-  if (!body.success) return res.status(400).json({ error: body.error.message, status: 400 });
-  const space = await createSpace(userId, body.data.name);
-  const out: CreateSpaceResponse = { spaceId: space._id, name: space.name };
-  res.status(201).json(out);
-}));
+app.post(
+  '/spaces',
+  safe(async (req, res) => {
+    const userId = userIdOf(req);
+    if (!userId) return res.status(401).json({ error: `missing ${USER_HEADER}`, status: 401 });
+    const body = CreateSpaceBody.safeParse(req.body ?? {});
+    if (!body.success) return res.status(400).json({ error: body.error.message, status: 400 });
+    const space = await createSpace(userId, body.data.name);
+    const out: CreateSpaceResponse = { spaceId: space._id, name: space.name };
+    res.status(201).json(out);
+  })
+);
 
-app.get('/spaces', safe(async (req, res) => {
-  const userId = userIdOf(req);
-  if (!userId) return res.status(401).json({ error: `missing ${USER_HEADER}`, status: 401 });
-  const out: ListSpacesResponse = { spaces: await listSpaces(userId) };
-  res.json(out);
-}));
+app.get(
+  '/spaces',
+  safe(async (req, res) => {
+    const userId = userIdOf(req);
+    if (!userId) return res.status(401).json({ error: `missing ${USER_HEADER}`, status: 401 });
+    const out: ListSpacesResponse = { spaces: await listSpaces(userId) };
+    res.json(out);
+  })
+);
 
 // ---------------------------------------------------------------- POST · GET /spaces/:spaceId/documents
 
@@ -368,45 +399,51 @@ const acceptedType = (mime: string, filename: string) =>
     ? (mime as (typeof ACCEPTED_UPLOAD_TYPES)[number])
     : BY_EXT[extname(filename).toLowerCase()];
 
-app.post('/spaces/:spaceId/documents', safe<{ spaceId: string }>(async (req, res) => {
-  const userId = userIdOf(req);
-  if (!userId) return res.status(401).json({ error: `missing ${USER_HEADER}`, status: 401 });
-  const space = await findSpace(userId, req.params.spaceId);
-  if (!space) return res.status(404).json({ error: `no space ${req.params.spaceId}`, status: 404 });
+app.post(
+  '/spaces/:spaceId/documents',
+  safe<{ spaceId: string }>(async (req, res) => {
+    const userId = userIdOf(req);
+    if (!userId) return res.status(401).json({ error: `missing ${USER_HEADER}`, status: 401 });
+    const space = await findSpace(userId, req.params.spaceId);
+    if (!space) return res.status(404).json({ error: `no space ${req.params.spaceId}`, status: 404 });
 
-  // Run multer by hand so its size error becomes a 413 instead of falling into the 502 handler.
-  const parsed = await new Promise<Error | null>((resolve) =>
-    upload.single('file')(req, res, (e) => resolve(e ?? null))
-  );
-  if (parsed) {
-    const status = (parsed as { code?: string }).code === 'LIMIT_FILE_SIZE' ? 413 : 400;
-    return res.status(status).json({ error: parsed.message, status });
-  }
-  const file = req.file;
-  if (!file) return res.status(400).json({ error: 'multipart field "file" is required', status: 400 });
-  const mimeType = acceptedType(file.mimetype, file.originalname);
-  if (!mimeType) return res.status(400).json({ error: `unsupported type ${file.mimetype}`, status: 400 });
+    // Run multer by hand so its size error becomes a 413 instead of falling into the 502 handler.
+    const parsed = await new Promise<Error | null>((resolve) =>
+      upload.single('file')(req, res, (e) => resolve(e ?? null))
+    );
+    if (parsed) {
+      const status = (parsed as { code?: string }).code === 'LIMIT_FILE_SIZE' ? 413 : 400;
+      return res.status(status).json({ error: parsed.message, status });
+    }
+    const file = req.file;
+    if (!file) return res.status(400).json({ error: 'multipart field "file" is required', status: 400 });
+    const mimeType = acceptedType(file.mimetype, file.originalname);
+    if (!mimeType) return res.status(400).json({ error: `unsupported type ${file.mimetype}`, status: 400 });
 
-  const docId = await createDocument({
-    userId,
-    spaceId: space._id,
-    title: file.originalname,
-    mimeType,
-    buffer: file.buffer
-  });
+    const docId = await createDocument({
+      userId,
+      spaceId: space._id,
+      title: file.originalname,
+      mimeType,
+      buffer: file.buffer
+    });
 
-  const out: UploadDocumentResponse = { docId, status: 'pending' };
-  res.status(202).json(out);
-}));
+    const out: UploadDocumentResponse = { docId, status: 'pending' };
+    res.status(202).json(out);
+  })
+);
 
-app.get('/spaces/:spaceId/documents', safe<{ spaceId: string }>(async (req, res) => {
-  const userId = userIdOf(req);
-  if (!userId) return res.status(401).json({ error: `missing ${USER_HEADER}`, status: 401 });
-  const space = await findSpace(userId, req.params.spaceId);
-  if (!space) return res.status(404).json({ error: `no space ${req.params.spaceId}`, status: 404 });
-  const out: ListDocumentsResponse = { documents: await listDocuments(userId, space._id) };
-  res.json(out);
-}));
+app.get(
+  '/spaces/:spaceId/documents',
+  safe<{ spaceId: string }>(async (req, res) => {
+    const userId = userIdOf(req);
+    if (!userId) return res.status(401).json({ error: `missing ${USER_HEADER}`, status: 401 });
+    const space = await findSpace(userId, req.params.spaceId);
+    if (!space) return res.status(404).json({ error: `no space ${req.params.spaceId}`, status: 404 });
+    const out: ListDocumentsResponse = { documents: await listDocuments(userId, space._id) };
+    res.json(out);
+  })
+);
 
 // ---------------------------------------------------------------- everything else: 501
 
