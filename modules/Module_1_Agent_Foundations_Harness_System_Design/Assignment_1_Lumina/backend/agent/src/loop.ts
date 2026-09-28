@@ -99,6 +99,32 @@ const newResearch = (query: string, budget: number, sq?: number): Research => ({
 const HISTORY_MAX_TURNS = 6;
 const HISTORY_MAX_CHARS = 1500;
 
+/**
+ * A quick question that cannot be searched as typed because it leans on the thread: it opens as a
+ * continuation, points back at something, leads with a pronoun, or is too short to name a topic.
+ * Only strong signals: "What is X and what are its limits?" names its own subject and is not one.
+ * A miss costs sources that may not cover the question, which the answer then says plainly; a false
+ * hit costs the research turn, i.e. the latency this check exists to save.
+ */
+export function needsThread(query: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (q.split(/\s+/).length <= 3) return true;
+  if (/^(and|but|so|also|then|or|what about|how about|why not)\b/.test(q)) return true;
+  if (/\b(the|that|this) (first|second|third|last|former|latter|other|same|previous) ?(one|ones)?\b/.test(q)) return true;
+  if (/\b(that one|this one|those|these|the above|mentioned|you said)\b/.test(q)) return true;
+  if (/\b(that|this)[?.!]*$/.test(q)) return true; // "…to host that?"; a trailing "it" usually points inside the question
+  // "What would it cost to…", "is it possible to…": an "it" that points forward, not back.
+  if (/\bit (would |will |does |did )?(cost|take|be|mean|make sense|possible|safe|worth|better|necessary)\b/.test(q))
+    return false;
+  return /^(what|how|why|when|where|who|which|is|are|was|were|does|do|did|can|could|should|would|will)( \w+)? (it|its|they|them|their|this|that)\b/.test(
+    q
+  );
+}
+
+/** The quick pre-search reads up to this many of its results as pages; a page shorter than the floor is a stub. */
+const PRESEARCH_PAGES = 4;
+const PRESEARCH_PAGE_MIN_CHARS = 500;
+
 /** Injected memory is capped, so a chatty user cannot crowd out the sources. */
 const MEMORY_MAX_ROWS = 10;
 const MEMORY_MAX_CHARS = 4000;
@@ -250,7 +276,8 @@ export async function runQuickLoop(
   async function dispatch(
     name: string,
     input: Record<string, unknown>,
-    research?: Research
+    research?: Research,
+    opts?: { withPages?: boolean }
   ): Promise<{ output: string; note?: string }> {
     // Retrieval writes into one question's research; memory serves the whole run.
     const own = () => {
@@ -259,13 +286,34 @@ export async function runQuickLoop(
     };
     switch (name) {
       case 'web_search': {
-        const { results, cached, note } = await cachedWebSearch(String(input.query));
+        const { results, cached, note } = await cachedWebSearch(
+          String(input.query),
+          opts?.withPages ? 'fast-pages' : 'basic'
+        );
         searchHits.push(cached);
         for (const r of results) titles.set(r.url, r.title);
+        // The quick pre-search came back with the pages themselves: they are read here, in rank
+        // order, exactly as fetch_page would have read them. No model turn chooses them.
+        const read = new Set<string>();
+        if (opts?.withPages) {
+          const { pages } = own();
+          for (const r of results) {
+            if (read.size >= PRESEARCH_PAGES) break;
+            if (!r.content || r.content.length < PRESEARCH_PAGE_MIN_CHARS) continue;
+            if (pages.some((p) => p.url === r.url)) continue;
+            pages.push({ url: r.url, title: r.title, text: r.content.slice(0, 8000) }); // fetchPage's cap
+            read.add(r.url);
+          }
+        }
         const output = results
-          .map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}\n   ${r.snippet.slice(0, 160)}`)
+          .map(
+            (r, i) =>
+              `${i + 1}. ${r.title}${read.has(r.url) ? ' (already read)' : ''}\n   ${r.url}\n   ${r.snippet.slice(0, 160)}`
+          )
           .join('\n');
-        return { output, note }; // note: "search cache hit", "cache bypassed", or undefined on a plain miss
+        const pagesNote = opts?.withPages ? `${read.size} page(s) read from the results` : undefined;
+        // note: "search cache hit", "cache bypassed", or undefined on a plain miss; plus what was read
+        return { output, note: [note, pagesNote].filter(Boolean).join('; ') || undefined };
       }
 
       case 'fetch_page': {
@@ -328,7 +376,8 @@ export async function runQuickLoop(
     name: TraceEvent['tool'],
     input: Record<string, unknown>,
     reason?: string,
-    research?: Research
+    research?: Research,
+    opts?: { withPages?: boolean }
   ): Promise<{ output: string; error?: string }> {
     if (research) research.calls += 1; // same synchronous moment as step, so a parallel burst counts in order
     step += 1;
@@ -339,7 +388,7 @@ export async function runQuickLoop(
     let fatal: ProviderError | undefined;
     let note: string | undefined;
     try {
-      const r = await dispatch(name, input, research);
+      const r = await dispatch(name, input, research, opts);
       output = r.output;
       note = r.note;
     } catch (e) {
@@ -412,27 +461,34 @@ export async function runQuickLoop(
       return;
     }
     // A planned sub-question is already spelled out; only a quick question in a thread may lean on it.
-    const followUp = r.sq === undefined && history.length > 0;
+    const inThread = r.sq === undefined && history.length > 0;
+    const followUp = inThread && needsThread(r.query);
     const tag = r.sq ? `harness: sub-question ${r.sq}` : `router: mode=${ctx.mode}`;
     // The question as typed is searched first even in a thread: it is the only search string that is
     // the same every time the question is asked, so it is the one the cache can serve. Skipping it
     // whenever the thread had history made every repeat depend on the model rewording its search the
     // same way twice (12.5% hits on the first full bench). The thread still reaches the model, so a
     // real follow-up ("and its price?") searches again with the topic spelled out.
+    // A quick question that stands on its own gets its pages from this search, so no model turn is
+    // spent choosing what to fetch (that turn and the fetches were ~2.7 s of a 6.6 s median TTFT).
+    // A follow-up's as-typed results are likely off-topic, so it gets results only, as before.
+    const withPages = r.sq === undefined && !followUp;
     const [web, docs] = await Promise.all([
-      useWeb ? callTool('web_search', { query: r.query }, `${tag}, the question as typed`, r) : undefined,
+      useWeb
+        ? callTool('web_search', { query: r.query }, `${tag}, the question as typed`, r, { withPages })
+        : undefined,
       useDocs
         ? callTool('search_documents', { query: r.query }, `${tag}, space ${ctx.spaceId}`, r)
         : undefined,
       recall
     ]);
     let opening = [
-      followUp ? `Earlier in this conversation:\n${historyText(history)}` : '',
+      inThread ? `Earlier in this conversation:\n${historyText(history)}` : '',
       r.sq ? `This is one part of a larger question: ${query}` : '',
       `Question: ${r.query}`,
       web ? `Web results for the question as typed:\n${web.output}` : '',
       docs ? `Passages from the user's own documents:\n${docs.output}` : '',
-      followUp
+      inThread
         ? 'If the question only makes sense with the earlier turns and these results miss its topic, search again with the full topic spelled out. Otherwise work with these results.'
         : ''
     ]
@@ -445,9 +501,10 @@ export async function runQuickLoop(
     const tools = r.sq ? toolsFor(ctx).filter((t) => t.name !== 'save_memory') : toolsFor(ctx);
 
     const docsFull = () => !useWeb && r.docLists.flat().length >= env.ragTopK;
-    const skipResearch = !followUp && docsFull();
+    // The same "enough to answer from" test the research loop ends on, applied before its first turn.
+    const skipResearch = !followUp && (r.pages.length >= 2 || docsFull());
     if (skipResearch)
-      log.debug({ phase: 'research', sq: r.sq, skipped: true }, 'pre-search already has top-k');
+      log.debug({ phase: 'research', sq: r.sq, skipped: true, pages: r.pages.length }, 'pre-search is enough');
 
     // ---- phase 1: research. Tools on. Nothing streams but the trace.
     while (!skipResearch) {

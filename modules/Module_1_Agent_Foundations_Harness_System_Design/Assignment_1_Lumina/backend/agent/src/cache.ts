@@ -1,9 +1,12 @@
 import { createHash } from 'node:crypto';
-import type { SearchResult } from './tools.js';
+import pino from 'pino';
+import type { SearchMode, SearchResult } from './tools.js';
 import { COLLECTIONS, SearchCacheDoc } from '@lumina/contract';
 import { db } from './db.js';
 import { env } from './env.js';
 import { webSearch } from './tools.js';
+
+const log = pino({ level: env.logLevel });
 
 /**
  * The query as the cache sees it. Only transformations that cannot change the meaning:
@@ -20,10 +23,13 @@ export function normalizeQuery(query: string): string {
 /**
  * sha256(normalized query + provider). The provider is in the key so a SEARCH_PROVIDER flip
  * never serves the other provider's rows. Same as hashlib.sha256(s.encode()).hexdigest().
+ * A mode other than 'basic' is in the key too: a 'fast-pages' row carries the pages' text and a
+ * 'basic' row does not, so neither may answer for the other. 'basic' adds nothing, so the rows
+ * written before modes existed keep their keys.
  */
-export function cacheKey(query: string, provider: string): string {
+export function cacheKey(query: string, provider: string, mode: SearchMode = 'basic'): string {
   return createHash('sha256')
-    .update(`${normalizeQuery(query)}\n${provider}`)
+    .update(`${normalizeQuery(query)}\n${provider}${mode === 'basic' ? '' : `\n${mode}`}`)
     .digest('hex');
 }
 
@@ -106,13 +112,13 @@ export function isTimeSensitive(query: string): boolean {
 export type CachedSearch = { results: SearchResult[]; cached: boolean; note?: string };
 
 /** LRU, then Mongo, then the provider. Fills the tiers above whichever one answered. */
-export async function cachedWebSearch(query: string): Promise<CachedSearch> {
+export async function cachedWebSearch(query: string, mode: SearchMode = 'basic'): Promise<CachedSearch> {
   if (isTimeSensitive(query)) {
-    const results = await webSearch(query); // no read, no write: the row would never be served anyway
+    const results = await webSearch(query, mode); // no read, no write: the row would never be served anyway
     return { results, cached: false, note: 'time-sensitive query, cache bypassed' };
   }
   const provider = env.searchProvider;
-  const key = cacheKey(query, provider);
+  const key = cacheKey(query, provider, mode);
 
   const hot = lru.get(key);
   if (hot) return { results: hot.results, cached: true, note: 'search cache hit' };
@@ -123,8 +129,13 @@ export async function cachedWebSearch(query: string): Promise<CachedSearch> {
     return { results: warm.results, cached: true, note: 'search cache hit' };
   }
 
-  const results = await webSearch(query); // throws ProviderError on a provider failure; nothing here catches it
-  const entry = await writeMongo(key, query, provider, results);
-  lru.set(key, entry);
+  const results = await webSearch(query, mode); // throws ProviderError on a provider failure; nothing here catches it
+  lru.set(key, { results, expiresAt: Date.now() + env.searchCacheTtlSeconds * 1000 });
+  // Written behind the answer: the Atlas write took 110-215 ms that the first token waited on. A
+  // failed write costs a later miss (this process still has the LRU row), never this answer; it is
+  // logged at error because it also means schema drift or a sick database.
+  writeMongo(key, query, provider, results).catch((err: unknown) =>
+    log.error({ err, key, provider }, 'search cache write failed')
+  );
   return { results, cached: false };
 }

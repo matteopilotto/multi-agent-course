@@ -1,7 +1,15 @@
 import { secrets } from './env.js';
 import { ProviderError } from './errors.js';
 
-export type SearchResult = { title: string; url: string; snippet: string };
+/** content: the page's own text, only when the search was asked for pages. */
+export type SearchResult = { title: string; url: string; snippet: string; content?: string };
+
+/**
+ * 'basic': Tavily's default depth, results only; the model fetches what it wants to read.
+ * 'fast-pages': the quick pre-search. Measured at concurrency 4: 0.6-0.7 s with the pages'
+ * text included, against 1.5-2.7 s for 'basic' without it, then a model turn and the fetches.
+ */
+export type SearchMode = 'basic' | 'fast-pages';
 
 /** One HTTP call to Tavily. Throws on a non-2xx: fail loud, never return a plausible empty. */
 async function tavily<T>(path: string, body: Record<string, unknown>): Promise<T> {
@@ -25,13 +33,19 @@ async function tavily<T>(path: string, body: Record<string, unknown>): Promise<T
   return (await r.json()) as T;
 }
 
-export async function webSearch(query: string): Promise<SearchResult[]> {
-  type Raw = { results: { title: string; url: string; content: string }[] };
-  const data = await tavily<Raw>('search', { query, max_results: 5 });
+export async function webSearch(query: string, mode: SearchMode = 'basic'): Promise<SearchResult[]> {
+  type Raw = { results: { title: string; url: string; content: string; raw_content?: string | null }[] };
+  const data = await tavily<Raw>(
+    'search',
+    mode === 'fast-pages'
+      ? { query, max_results: 5, search_depth: 'fast', include_raw_content: 'markdown' } // markdown, like extract
+      : { query, max_results: 5 }
+  );
   return data.results.map((x) => ({
     title: x.title,
     url: x.url,
-    snippet: x.content
+    snippet: x.content,
+    ...(x.raw_content ? { content: x.raw_content } : {})
   }));
 }
 
