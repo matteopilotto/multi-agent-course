@@ -82,6 +82,7 @@ import { extname } from 'node:path';
 import { findSpace } from './spaces.js';
 import { createDocument, listDocuments } from './documents.js';
 import { getStats } from './stats.js';
+import { reserveDeep, type DeepSlot } from './spend.js';
 
 const log = pino({ level: env.logLevel });
 const app = express();
@@ -244,6 +245,26 @@ app.post(
 
     // Read the history BEFORE appending this turn, or the question shows up twice.
     const history = await threadMessages(thread._id);
+
+    // The spend gate, here and not at the gateway: a cap on the edge is skipped by calling this
+    // service directly. Before the stream opens, so the refusal is a real 429 and not an SSE event.
+    // A refused request is never recorded, so it does not spend the allowance it was refused for.
+    let slot: DeepSlot | undefined;
+    if (body.data.depth === 'deep') {
+      const reserved = await reserveDeep(userId);
+      if ('resetsAt' in reserved) {
+        log.warn({ requestId, userId, cap: env.deepDailyCap }, 'deep search refused: daily cap reached');
+        res.setHeader('Retry-After', String(Math.ceil((Date.parse(reserved.resetsAt) - Date.now()) / 1000)));
+        return res.status(429).json({
+          error: `deep search daily cap reached (${env.deepDailyCap} per day)`,
+          status: 429,
+          resetsAt: reserved.resetsAt,
+          requestId
+        });
+      }
+      slot = reserved;
+    }
+
     // The user turn and the title are writes nothing reads until the next request, so they run
     // alongside the planner instead of in front of it: two M0 round trips off deep's time to plan.
     // Awaited before `done`, because `done` promises a follow-up will see this turn.
@@ -329,6 +350,8 @@ app.post(
       );
       send(res, 'error', { status: 502, error: e instanceof Error ? e.message : String(e) });
       await record('error', cost, 502);
+    } finally {
+      slot?.release(); // after record(): the requests row exists before the slot is given back
     }
     res.end();
   })
