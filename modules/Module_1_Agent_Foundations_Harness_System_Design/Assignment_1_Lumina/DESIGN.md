@@ -12,9 +12,11 @@ evidence file.
    limits, and forwards the request to the agent service. It does the boring work so the
    agent service does not have to.
 3. **Agent service**, on Fly.io, private network only. The AI backend. It runs the agent loop:
-   ask the LLM, run the tool it picks, feed the result back, repeat, stream the answer. Quick
-   and deep search, memory, and document search all live here. Nobody outside can reach it,
-   only the gateway.
+   ask the LLM, run the tool it picks, feed the result back, repeat, stream the answer. A quick
+   question that stands on its own skips most of that loop: one search brings back the pages as
+   well as the links, and the answer is written straight from them. The full loop runs for
+   follow-ups, for deep search, and when that one search comes back thin. Quick and deep search,
+   memory, and document search all live here. Nobody outside can reach it, only the gateway.
 4. **Jobs worker**, its own process, same code as the agent service. It picks up upload jobs
    from Mongo and does the slow work: parse the file, split it into chunks, embed them, write
    them, and check they can be found. It runs separately so a long PDF parse never blocks a
@@ -23,9 +25,11 @@ evidence file.
    the system of record for threads, messages, memories, documents, and chunks; the vector
    index for chunks and memories; and the job queue plus the search cache. One cluster instead
    of four services, at the cost of tying everything to Atlas.
-6. **Anthropic**, the LLM. It decides which tool to call next and writes the answers.
+6. **Anthropic**, the LLM. It writes the answers, and on follow-ups and deep search it decides
+   which tool to call next.
 7. **Tavily**, web search and page extraction. It lets the agent search the web and read
-   pages. It can be swapped for SerpApi through one environment variable.
+   pages. For a quick question one call does both: a fast search that returns the pages' text
+   along with the links. It can be swapped for SerpApi through one environment variable.
 8. **OpenAI**, embeddings only. It turns documents, memories, and queries into vectors so they
    can be compared.
 9. **Run logs**, one file per answer, in `runs/` locally or the `runs` collection in
@@ -128,7 +132,11 @@ job row. From then on the worker owns that document's status and everything in `
 worker process owns its own heartbeat row in `workers`.
 
 Three pieces of state live outside Mongo, in memory, and all three are lost on a restart. The LRU
-in front of `searchCache` is a pure cache and refills from the collection. The agent's in-flight
+in front of `searchCache` is a pure cache and refills from the collection. On a miss the LRU gets
+the new result first, and the Mongo row is written after the answer has moved on, because that
+write took 110 to 215 ms the first word used to wait for. So for a moment, or for good if the write
+fails, this process knows a result the collection does not. A failed write is logged as an error
+and costs a later miss, never a wrong answer. The agent's in-flight
 deep-search reservations and the gateway's per-user rate-limit buckets are counters: a restart
 forgets them, which costs at most a few extra requests, and a second machine would need them in
 a shared store before they meant anything across machines.
@@ -144,7 +152,7 @@ query for one of the chunks it just wrote and getting it back. Until then the do
 
 ## Trade-offs
 
-Five decisions where a reasonable engineer would have picked differently. In each case I chose
+Six decisions where a reasonable engineer would have picked differently. In each case I chose
 fewer moving parts and paid for it somewhere else.
 
 1. **Atlas Vector Search instead of a dedicated vector store** like Pinecone or Qdrant. The
@@ -163,7 +171,12 @@ fewer moving parts and paid for it somewhere else.
    Hits on the LRU cost nothing, and the Mongo tier survives restarts and expires itself. What I
    gave up: the LRU is per process, so if I ever run two agent machines they share only the
    slower Mongo tier. And Mongo sweeps expired rows about once a minute, so the code has to check
-   `expiresAt` itself or it can serve a result a few seconds past its TTL.
+   `expiresAt` itself or it can serve a result a few seconds past its TTL. The key is the text that
+   was searched, so a repeat only hits if it searches the same words. That is why the question is
+   always searched first exactly as the user typed it, even deep in a thread. The first version
+   skipped that whenever the thread had history and left the wording to the model, and the model
+   rarely worded a repeat the same way twice: the first full bench measured 12.5 % hits on a
+   workload that was half repeats.
 
 4. **The worker as a separate process instead of a `worker_threads` thread.** A crash while
    parsing a bad PDF cannot take the HTTP server down with it, and the two can be restarted and
@@ -174,6 +187,20 @@ fewer moving parts and paid for it somewhere else.
    at, and the embedding model is the one the assignment names. What I gave up: two keys, two
    bills, and two services that can each be down. A memory or document query fails if OpenAI is
    unreachable even when Claude is fine.
+
+6. **Quick search reads the pages the search engine ranks highest, instead of letting the model
+   choose which to read.** A quick question that stands on its own gets one Tavily call in its
+   fast mode, which returns the text of the top pages along with the links, and the top four
+   pages with real text become the sources. Before, a model turn read the results and picked the
+   pages to fetch, and that turn plus the fetches were about 2.7 of the 6.6 seconds a user waited
+   for the first word. On the same six questions the median wait went from 6.6 to 2.5 seconds.
+   What I gave up: the model no longer judges which results are worth reading, the fast mode may
+   rank less well than the default one, and only a question that does not look like a follow-up
+   gets this path. A few word patterns make that call: "and…", "the second one", "does it…", a
+   question of three words or fewer. A follow-up that slips past them is searched without the
+   thread, so its sources can miss the point, and the most the answer can do is say so. Under the
+   bench's load the 95th percentile was still 5.7 seconds against a target of 2.5, so this was
+   the biggest cut, not the last one.
 
 The one I am least sure about is number 4. For one cohort's load the crash isolation may never
 matter, and a `worker_threads` thread inside the agent process would be one fewer thing to deploy
