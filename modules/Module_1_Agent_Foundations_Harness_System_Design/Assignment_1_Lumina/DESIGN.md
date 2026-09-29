@@ -90,7 +90,10 @@ per process. If Mongo is unreachable, an in-flight ask fails loud with `502`, th
 `/health` reports `db: down`, and the worker logs each failed poll and keeps polling, waiting a
 little longer each time up to 30 seconds, until Mongo is back. The first version did not keep
 that promise: one failed poll ended the worker process, and I only found out because an upload
-sat at `pending` with nothing saying why.
+sat at `pending` with nothing saying why. The agent broke it once too. Every route goes through a
+wrapper that turns a failed database call into a `502`, and `/stats` had been left out of it, so
+when Atlas stopped resolving overnight, the UI's next `/stats` poll ended the whole agent process
+and nothing restarted it. Now `/stats` goes through the wrapper like every other route.
 
 **HTTP process to worker.** They never talk directly. The upload handler writes a `pending`
 document row and a `pending` job row and returns `202` at once. The worker polls the `jobs`
@@ -130,6 +133,12 @@ Who owns what: the agent service's HTTP process owns threads, messages, memories
 search cache, and the request and run records. The upload handler creates a document row and its
 job row. From then on the worker owns that document's status and everything in `chunks`, and each
 worker process owns its own heartbeat row in `workers`.
+
+An answer reads only the part of its thread it uses. Before the stream opens, an ask reads the
+last six messages, role and text only. At first it read the whole thread with every answer's
+sources, and that download grew with every question: on the bench's 80-message thread it took
+1.6 to 2.0 seconds, all of it before the user saw anything. The last six come back in about 0.1
+seconds however long the thread is. The UI still reads the whole thread, because it shows it all.
 
 Three pieces of state live outside Mongo, in memory, and all three are lost on a restart. The LRU
 in front of `searchCache` is a pure cache and refills from the collection. On a miss the LRU gets
@@ -200,7 +209,9 @@ fewer moving parts and paid for it somewhere else.
    question of three words or fewer. A follow-up that slips past them is searched without the
    thread, so its sources can miss the point, and the most the answer can do is say so. Under the
    bench's load the 95th percentile was still 5.7 seconds against a target of 2.5, so this was
-   the biggest cut, not the last one.
+   the biggest cut, not the last one. After the next cut, reading only the last six turns of the
+   thread, a run shaped like the bench put new questions at 3.2 seconds at the 95th percentile.
+   What is left is the search itself and the time to the answer model's first word.
 
 The one I am least sure about is number 4. For one cohort's load the crash isolation may never
 matter, and a `worker_threads` thread inside the agent process would be one fewer thing to deploy
