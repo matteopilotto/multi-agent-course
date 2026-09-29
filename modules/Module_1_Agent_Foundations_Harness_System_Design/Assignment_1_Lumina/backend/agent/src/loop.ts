@@ -96,7 +96,7 @@ const newResearch = (query: string, budget: number, sq?: number): Research => ({
 });
 
 /** Earlier turns, bounded: a long thread must not eat the token budget. */
-const HISTORY_MAX_TURNS = 6;
+export const HISTORY_MAX_TURNS = 6;
 const HISTORY_MAX_CHARS = 1500;
 
 /**

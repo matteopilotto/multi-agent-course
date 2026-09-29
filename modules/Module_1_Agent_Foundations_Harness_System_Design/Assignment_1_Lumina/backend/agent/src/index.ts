@@ -66,6 +66,7 @@ import {
   findThread,
   listThreads,
   threadMessages,
+  recentMessages,
   appendMessage,
   titleFromFirstQuery
 } from './threads.js';
@@ -74,7 +75,7 @@ import { env } from './env.js';
 import { pingDb } from './db.js';
 import { lastHeartbeat } from './jobs.js';
 import { openStream, send } from './sse.js';
-import { providerSearchCalls, runQuickLoop, newRunState } from './loop.js';
+import { providerSearchCalls, runQuickLoop, newRunState, HISTORY_MAX_TURNS } from './loop.js';
 import { recordRequest, recordRun } from './runlog.js';
 import { listMemories, deleteMemory } from './memory.js';
 import { createSpace, listSpaces } from './spaces.js';
@@ -255,7 +256,8 @@ app.post(
     };
 
     // Read the history BEFORE appending this turn, or the question shows up twice.
-    const history = await threadMessages(thread._id);
+    // Only the turns the loop can use: the whole thread is a download that grows with every ask.
+    const history = await recentMessages(thread._id, HISTORY_MAX_TURNS);
 
     // The spend gate, here and not at the gateway: a cap on the edge is skipped by calling this
     // service directly. Before the stream opens, so the refusal is a real 429 and not an SSE event.

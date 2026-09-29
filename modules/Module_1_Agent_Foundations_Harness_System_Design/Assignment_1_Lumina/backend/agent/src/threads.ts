@@ -44,6 +44,20 @@ export async function threadMessages(threadId: string): Promise<ThreadMessage[]>
   }));
 }
 
+/**
+ * The last `n` messages, role and content only, oldest first: all an answer reads of its thread.
+ * The whole thread with its sources grew to 118 KB and 1.6-2.0 s from Atlas on the bench thread,
+ * all of it paid before the stream opened. `threadMessages` stays for the UI, which shows it all.
+ */
+export async function recentMessages(threadId: string, n: number): Promise<ThreadMessage[]> {
+  const rows = await (await messages())
+    .find({ threadId }, { projection: { role: 1, content: 1 } })
+    .sort({ createdAt: -1 })
+    .limit(n)
+    .toArray();
+  return rows.reverse().map((m) => ({ role: m.role, content: m.content }));
+}
+
 /** The UI lists threads by title, so the first question becomes the title. */
 export async function titleFromFirstQuery(threadId: string, query: string): Promise<void> {
   await (
