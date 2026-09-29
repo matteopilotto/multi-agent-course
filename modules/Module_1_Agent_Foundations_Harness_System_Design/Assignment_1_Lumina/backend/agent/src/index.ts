@@ -134,11 +134,14 @@ app.get('/health', async (_req, res) => {
 
 // ---------------------------------------------------------------- GET /stats
 
-app.get('/stats', async (req, res) => {
-  const userId = userIdOf(req);
-  if (!userId) return res.status(401).json({ error: `missing ${USER_HEADER}`, status: 401 });
-  res.json(await getStats(userId));
-});
+app.get(
+  '/stats',
+  safe(async (req, res) => {
+    const userId = userIdOf(req);
+    if (!userId) return res.status(401).json({ error: `missing ${USER_HEADER}`, status: 401 });
+    res.json(await getStats(userId));
+  })
+);
 
 // ---------------------------------------------------------------- POST /threads
 
