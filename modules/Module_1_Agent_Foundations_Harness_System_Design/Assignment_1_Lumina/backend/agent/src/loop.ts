@@ -21,6 +21,7 @@ import type { ModelUsage } from './cost.js';
 import { hybridSearchChunks, rrf, type ChunkHit } from './retrieval.js';
 import { documentTitles } from './documents.js';
 import { planResearch } from './planner.js';
+import { checkLater, skipAsPage } from './pagecheck.js';
 
 const log = pino({ level: env.logLevel });
 
@@ -343,15 +344,22 @@ export async function runQuickLoop(
         // The quick pre-search came back with the pages themselves: they are read here, in rank
         // order, exactly as fetch_page would have read them. No model turn chooses them.
         const read = new Set<string>();
+        const skipped: string[] = [];
         if (opts?.withPages) {
           const { pages } = own();
           for (const r of results) {
             if (read.size >= PRESEARCH_PAGES) break;
             if (!r.content || r.content.length < PRESEARCH_PAGE_MIN_CHARS) continue;
             if (pages.some((p) => p.url === r.url)) continue;
+            const skip = skipAsPage(r.url); // a page a plain reader cannot quote from: see pagecheck.ts
+            if (skip) {
+              skipped.push(`${r.url} (${skip})`);
+              continue;
+            }
             pages.push({ url: r.url, title: r.title, text: r.content.slice(0, 8000) }); // fetchPage's cap
             read.add(r.url);
           }
+          checkLater(results.filter((r) => r.content).map((r) => r.url)); // behind the answer, for the next one
         }
         const output = results
           .map(
@@ -359,7 +367,9 @@ export async function runQuickLoop(
               `${i + 1}. ${r.title}${read.has(r.url) ? ' (already read)' : ''}\n   ${r.url}\n   ${r.snippet.slice(0, 160)}`
           )
           .join('\n');
-        const pagesNote = opts?.withPages ? `${read.size} page(s) read from the results` : undefined;
+        const pagesNote = opts?.withPages
+          ? `${read.size} page(s) read from the results${skipped.length ? `; skipped ${skipped.join(', ')}` : ''}`
+          : undefined;
         // note: "search cache hit", "cache bypassed", or undefined on a plain miss; plus what was read
         return { output, note: [note, pagesNote].filter(Boolean).join('; ') || undefined };
       }

@@ -73,6 +73,7 @@ import {
 import { costUsd } from './cost.js';
 import { env } from './env.js';
 import { pingDb } from './db.js';
+import { loadPageChecks } from './pagecheck.js';
 import { lastHeartbeat } from './jobs.js';
 import { openStream, send } from './sse.js';
 import { providerSearchCalls, runQuickLoop, newRunState, HISTORY_MAX_TURNS } from './loop.js';
@@ -514,6 +515,10 @@ app.use((err: Error, _req: express.Request, res: express.Response, next: express
 app.listen(env.port, () => {
   // Open the Mongo client now, not on the first ask: the handshake took 1.6 s inside a request's ttft window.
   void pingDb().then((status) => log.info({ db: status }, 'mongo connection warmed'));
+  loadPageChecks().then(
+    (n) => log.info({ verdicts: n }, 'page checks loaded'),
+    (err: unknown) => log.error({ err }, 'page checks not loaded; pages are read unchecked until checked again')
+  );
   log.info(
     {
       port: env.port,
