@@ -54,6 +54,11 @@ because this service is private, so nobody can skip them by calling it directly.
 
 The agent service is the only component that writes long-term memory, and only through an
 explicit `save_memory` tool call. Nothing is remembered that `GET /memory` does not show.
+Exactly one model turn per question may make that call. For a follow-up it is the research
+turn, which sees the thread. For a question that stands on its own it is a small turn whose
+only tool is `save_memory`, because that question usually skips the research turn altogether
+(trade-off 6). Before that turn existed, "remember that I prefer…" got a reply saying it would
+be remembered, and nothing was saved.
 
 The jobs worker is the only component that can mark a document as `indexed`, and only after
 it has searched for one of the chunks it just wrote and found it.
@@ -109,7 +114,13 @@ still with a `200`: asks keep working, so this is a partial outage, not a dead a
 **Agent service and worker to providers.** The agent calls Anthropic, Tavily, and OpenAI over
 HTTPS. The worker calls only OpenAI, for embeddings. When a provider throws inside the agent,
 the loop stops, the run log says `terminated: "error"`, and the caller gets `502`, or an
-`error` SSE event if the stream has already started. When a provider throws inside the worker,
+`error` SSE event if the stream has already started. The one exception is a short blip on an
+embedding the agent needs while answering: if OpenAI is rate limiting, overloaded, or does not
+reply, the agent waits 300 ms and tries once more, and a second failure ends the run as above.
+The second full bench's only two errors were single OpenAI 500s. I also considered answering
+without the user's memories when recall fails, and said no: an answer that quietly drops "keep
+it under 100 words" is a plausible answer built on an exception, which is what the `502` rule
+is there to prevent. When a provider throws inside the worker,
 there is no caller to tell, so it writes `failed` and the error string onto the job and the
 document, where the next poll finds it.
 
@@ -195,7 +206,7 @@ fewer moving parts and paid for it somewhere else.
 5. **Two providers, Anthropic for the LLM and OpenAI for embeddings.** Each does what it is best
    at, and the embedding model is the one the assignment names. What I gave up: two keys, two
    bills, and two services that can each be down. A memory or document query fails if OpenAI is
-   unreachable even when Claude is fine.
+   unreachable even when Claude is fine. One retry covers a blip, not an outage.
 
 6. **Quick search reads the pages the search engine ranks highest, instead of letting the model
    choose which to read.** A quick question that stands on its own gets one Tavily call in its
@@ -210,8 +221,14 @@ fewer moving parts and paid for it somewhere else.
    thread, so its sources can miss the point, and the most the answer can do is say so. Under the
    bench's load the 95th percentile was still 5.7 seconds against a target of 2.5, so this was
    the biggest cut, not the last one. After the next cut, reading only the last six turns of the
-   thread, a run shaped like the bench put new questions at 3.2 seconds at the 95th percentile.
-   What is left is the search itself and the time to the answer model's first word.
+   thread, a run shaped like the bench put new questions at 3.2 seconds at the 95th percentile,
+   and the second full bench measured 4.4 seconds (median 2.7). What is left is the search itself
+   and the time to the answer model's first word. Skipping the research turn also skipped the
+   only place memory was saved, which the second bench caught. Remembering is now a turn of its
+   own that runs beside the search (see Responsibilities). It costs about $0.001 a question, and
+   when looking up memory and then deciding what to save take longer than the search, the
+   sources wait for them, because the stream has no place for a step after the first word: 0 to 0.2 seconds
+   in one warm probe of four questions, up to 1.5 seconds just after a restart.
 
 The one I am least sure about is number 4. For one cohort's load the crash isolation may never
 matter, and a `worker_threads` thread inside the agent process would be one fewer thing to deploy
