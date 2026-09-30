@@ -126,7 +126,7 @@ document, where the next poll finds it.
 
 ## State
 
-Everything durable lives in one MongoDB Atlas cluster, in eleven collections plus a GridFS bucket
+Everything durable lives in one MongoDB Atlas cluster, in twelve collections plus a GridFS bucket
 for the raw uploads. Every user's document carries the `userId` it belongs to, and the agent
 service and the worker are the only writers. The gateway stores nothing durable.
 
@@ -135,13 +135,13 @@ The collections fall into five buckets, sorted by what happens if you delete the
 | Bucket | Collections | If deleted |
 |---|---|---|
 | Authoritative | `threads`, `messages`, `memories`, `spaces`, `documents`, `jobs`, GridFS uploads | Gone for good. `jobs` looks disposable but is not: while a row is `pending`, it is the only record that work is still owed. |
-| Cache | `searchCache` | Nothing breaks. The next search misses, calls Tavily, and refills the row. Mongo already expires rows on its own through a TTL index, so the system is built to run with holes in it. |
+| Cache | `searchCache`, `pageChecks` | Nothing breaks. The next search misses, calls Tavily, and refills the row; a browser-only page is read once more, then checked and skipped again. Mongo already expires rows on its own through a TTL index, so the system is built to run with holes in it. |
 | Derived | `chunks` | Document search goes empty until every document is reset to `pending` and re-indexed. Rebuildable from GridFS, but not on its own, and the user notices in the meantime. |
 | Evidence | `requests`, `runs` | The product works the same. `/stats` drops to zero and the grader has nothing to read. |
 | Liveness | `workers` | Nothing is lost. `/health` calls the worker down until its next heartbeat, at most 5 seconds later. |
 
 Who owns what: the agent service's HTTP process owns threads, messages, memories, spaces, the
-search cache, and the request and run records. The upload handler creates a document row and its
+search cache, the page checks, and the request and run records. The upload handler creates a document row and its
 job row. From then on the worker owns that document's status and everything in `chunks`, and each
 worker process owns its own heartbeat row in `workers`.
 
@@ -229,6 +229,17 @@ fewer moving parts and paid for it somewhere else.
    when looking up memory and then deciding what to save take longer than the search, the
    sources wait for them, because the stream has no place for a step after the first word: 0 to 0.2 seconds
    in one warm probe of four questions, up to 1.5 seconds just after a restart.
+   The same cut cost me grounding. The search engine happily ranks pages a plain reader cannot
+   quote from: a video, or a forum or site whose text only appears after a browser runs it. Of the
+   41 citations the second bench could not find on their pages, 11 were pages like that; the first
+   bench, where the model picked the pages, had none. So quick search never reads a video page, and
+   every other page it reads is checked after the answer with a plain request. A page with under
+   100 words of text in its HTML is remembered as browser-only for a week, and so is a whole site
+   with two such pages and no readable one, and the next answer skips them. What I gave up: a page
+   is still read unchecked the first time it shows up, and a site's bad pages decide for its good
+   ones until one good page gets checked. Checking before the answer would have caught every one,
+   but on 29 questions it added 2.2 seconds at the median before the sources, and the pages it
+   catches were among the slowest to fetch.
 
 The one I am least sure about is number 4. For one cohort's load the crash isolation may never
 matter, and a `worker_threads` thread inside the agent process would be one fewer thing to deploy
