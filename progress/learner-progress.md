@@ -7,7 +7,7 @@
 - Name: [unset]
 - Preferred learning style: Socratic — ask guiding questions, reveal only when stuck
 - Started: 2026-09-06
-- Last session: 2026-09-29
+- Last session: 2026-09-30
 
 ## Module status
 
@@ -35,6 +35,12 @@ Status values: not started · in progress · completed · needs review
 - `TOOLS` (schemas) crosses the network; `TOOL_FUNCTIONS` (callables) stays local. Learner asked about this — good instinct, worth reinforcing.
 
 ## Next step
+- **LUMINA (Assignment 1), 2026-09-30: grounding miss diagnosed, snippet fix committed `f9766e5`** (answers-now mode; learner approved the probe, then the fix). Scripts and data in `/tmp/grounding/` (throwaway).
+  - **Rebuild (free, one fresh fetch per page):** re-read the bench threads via the gateway and scored every citation with the bench's own `normalize`/`snippetIsGrounded` (and its `stripHtml`, evaluated from `bench.mjs`'s source). Matches the bench: latest 41 failed (bench 41), ratio 0.804 (0.801); baseline 23 failed (bench 22). Doc citations 45/45.
+  - **The 41 failures:** 19 markdown picked as the snippet (image `![alt](src)`, links, contents lists, table rows), on both paths (fast 12, deep `fetch_page` 7; Extract returns markdown too); 11 pages the bench's plain fetch cannot read (YouTube ×6, text only in `<script>`; community.tavily.com ×5, empty app shell); 11 other (menu text, lines Tavily joins, text not in today's HTML). The baseline's 15 quick failures were all markdown. Hypotheses: (1) markdown: yes, but not what changed; (2) different HTML for the bench's user-agent: no (spice.ai/ably lack the text for a browser user-agent too; it is browser-rendered); (3) predates the fast path: yes. The fast path added the browser-only pages (Tavily's ranking picks them; the model did not).
+  - **Probe ($0.23, 29 Tavily credits, no LLM):** 80 fast pages (20 web questions) + 41 deep pages, old vs candidate pickers, bench's check vs fresh fetch. Candidate C: fast 50 → 61/61, deep 31 → 34/36, 0 regressions. **Held-out ($0.07, 9 searches, smoke + deep questions, not tuned on):** new pages 23 → 27/27, 0 regressions.
+  - **Fix (in `loop.ts`):** `pickSnippet` now picks the best prose sentence (+ following sentences on the same line, ≤ 300 chars, never mid-word) as a reader sees it: images dropped, `[text](url)` → spaced text, skips headings / table rows / link lists / glued menus / Tavily `Title:` lines; an all-menu page falls back to its best cleaned line. String work only: no TTFT or cost change. Typecheck + lint clean; the probe reading the shipped code gives C's snippet on 105/105 pages.
+  - **Still open:** estimated bench grounding ~0.93, still < 0.95; the rest is browser-only pages (the next lever, the learner's call). Only a full re-bench (~$3–4, go-ahead needed) measures it. DESIGN.md never mentions snippets.
 - **LUMINA (Assignment 1), 2026-09-29 (evening): second full bench on `e3287b8`, one run, bench exit 1, ~$3 model spend. No code changed.** Archived in `reports/baselines/2026-09-29_full_e3287b8/` (git-ignored; README lists the misses). Pre-flight: 0 bench questions warm in `searchCache`, agent started after the newest save, connections warmed.
   - **Fixed since the baseline:** TTFT p50/p95 6088/10168 → **2661/4435 ms** (p95 still a miss vs 2500); answer p95 15631 → **9818 ms (pass)**; cache hit 12.5 → **50 % (pass, all 20 repeats hit, zero slack)**; `quickBudget` 3/75 → **0/73 (pass)**; quick cost $0.0268 → $0.0222. Deep plan p95 3771 → 3912 ms (pass, thinner margin); recall@5 30/30 → 29/30 (pass).
   - **New misses:**
