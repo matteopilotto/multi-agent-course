@@ -191,27 +191,71 @@ export type LoopResult = {
   plan?: PlanEvent;
 };
 
-/** The paragraph of a fetched page most related to the query, verbatim, so the grounding check can find it. */
+const MD_IMAGE = /!\[[^\]]*\]\([^)]*\)/g;
+const MD_LINK = /\[([^\]]*)\]\([^)]*\)/g;
+/** Header lines Tavily puts above some pages' text; they are not on the page. */
+const TAVILY_META = /^\s*(Title|URL Source|Published Time|Markdown Content):/;
+
+/** A markdown line as a reader sees it: images dropped, links as their text (spaced), no list marker. */
+function readerText(line: string): string {
+  return line
+    .replace(MD_IMAGE, ' ')
+    .replace(MD_LINK, ' $1 ')
+    .replace(/^\s*(?:[*+-]|\d+\.|>)\s+/, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** Page prose, not page furniture: no heading, table row, link list or glued menu. */
+function isProse(raw: string, text: string): boolean {
+  if (/^\s*#/.test(raw)) return false;
+  if ((raw.match(/\|/g) ?? []).length >= 2) return false;
+  const linkText = [...raw.matchAll(MD_LINK)].reduce((n, m) => n + (m[1] ?? '').length, 0);
+  if (linkText > text.length * 0.5) return false;
+  const words = text.split(' ').length;
+  const glued = (text.match(/[a-z][A-Z]/g) ?? []).length; // "PineconeQdrantWeaviate"
+  if (glued >= 4 && glued * 8 > words) return false;
+  return words >= 8;
+}
+
+/**
+ * The sentence of a fetched page most related to the query, plus the sentences after it on the
+ * same line up to 300 characters, as a reader sees the page. Tavily returns markdown; the grounding
+ * check reads the page's HTML text, where a link's URL and an image's alt text never appear.
+ */
 function pickSnippet(text: string, query: string): string {
   const terms = query
     .toLowerCase()
     .split(/\W+/)
     .filter((t) => t.length > 3);
-  const paragraphs = text
-    .split(/\n+/)
-    .map((p) => p.trim())
-    .filter((p) => p.length > 80);
-  let best = paragraphs[0] ?? text.slice(0, 300);
+  const score = (s: string) => terms.filter((t) => s.toLowerCase().includes(t)).length;
+  const lines = text.split(/\n+/).filter((l) => !TAVILY_META.test(l));
+  let best: string | undefined;
   let bestScore = -1;
-  for (const p of paragraphs) {
-    const lower = p.toLowerCase();
-    const score = terms.filter((t) => lower.includes(t)).length;
-    if (score > bestScore) {
-      best = p;
-      bestScore = score;
+  for (const raw of lines) {
+    const line = readerText(raw);
+    if (!isProse(raw, line)) continue;
+    const sentences = line.split(/(?<=[.!?])\s+(?=[A-Z0-9"'(])/);
+    for (const [i, s] of sentences.entries()) {
+      if (s.split(' ').length < 6 || /\[|\]\(/.test(s)) continue; // too short, or markdown readerText could not unpick
+      if (score(s) <= bestScore) continue;
+      let span = s;
+      for (const next of sentences.slice(i + 1)) {
+        if (`${span} ${next}`.length > 300) break;
+        span = `${span} ${next}`;
+      }
+      best = span;
+      bestScore = score(s);
     }
   }
-  return best.slice(0, 300);
+  if (best === undefined) {
+    // No prose in what was read (a page that is all menu): the best line that is still page text.
+    for (const l of lines.map(readerText).filter((l) => l.split(' ').length >= 8)) {
+      if (score(l) > bestScore) [best, bestScore] = [l, score(l)];
+    }
+  }
+  best ??= text.slice(0, 300);
+  return best.length <= 300 ? best : best.slice(0, 300).replace(/\s+\S*$/, ''); // never cut mid-word
 }
 
 /** Two spellings of one page are one source: no fragment, no trailing slash. */
