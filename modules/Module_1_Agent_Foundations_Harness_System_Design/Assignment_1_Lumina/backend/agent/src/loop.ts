@@ -36,6 +36,10 @@ Results for the question may already be in the first message. Which tools you ha
 4. When you have read enough, reply with the single word READY.
 5. If the user states a durable fact or preference about themselves, call save_memory with it once. If the user's message is only such a statement, save it and reply READY.`;
 
+const MEMORY_SYSTEM = `You are the memory step of LUMINA, a search assistant. You never answer the message.
+If the user's message states a durable fact or preference about themselves (how they want answers, what they build with, their role), call save_memory with it once. A question, however specific, states nothing to remember. Anything listed under what you know about the user is already saved.
+Otherwise reply with the single word NONE.`;
+
 const ANSWER_SYSTEM = `You are LUMINA, a search assistant that answers with citations.
 Write a concise answer (3 to 6 sentences) using ONLY the numbered sources below.
 The sources may be web pages, excerpts from the user's own documents, or both. A document excerpt is cited exactly like a web page: [n].
@@ -449,6 +453,37 @@ export async function runQuickLoop(
   // ---- phase 0: recall once, as a harness step: memory is about the user, not about any one
   // part of the question. Every research awaits the same promise.
   const recall = callTool('recall_memory', { query }, 'harness: what is known about this user');
+
+  /**
+   * Whether the message states something to remember, decided by a turn whose only tool is
+   * save_memory. A standalone quick question usually skips the research turn, which is where
+   * save_memory used to be offered, so "remember that I…" was answered and never saved. It runs
+   * beside the pre-search and ends before `sources`: the stream has no place for a trace after a token.
+   */
+  async function rememberIfStated(message: string): Promise<void> {
+    await recall; // what is already known, so the same preference is not saved twice
+    const t0 = Date.now();
+    const response = await client.messages.create({
+      model: env.llmModelResearch,
+      max_tokens: 256,
+      system: MEMORY_SYSTEM,
+      tools: TOOL_SCHEMAS.filter((t) => t.name === 'save_memory'),
+      messages: [
+        { role: 'user', content: [memoryBlock(recalled), `Message: ${message}`].filter(Boolean).join('\n\n') }
+      ]
+    });
+    log.debug({ phase: 'memory', ms: Date.now() - t0, inTokens: response.usage.input_tokens }, 'model call');
+    addUsage(env.llmModelResearch, response.usage);
+    const save = response.content.find((b): b is Anthropic.ToolUseBlock => b.type === 'tool_use');
+    if (save) {
+      await callTool(
+        'save_memory',
+        save.input as Record<string, unknown>,
+        'harness: the message states something about the user'
+      );
+    }
+  }
+
   const useWeb = ctx.mode !== 'docs';
   const useDocs = ctx.mode !== 'web' && !!ctx.spaceId;
   /** Set when any research throws: the other lanes finish their current turn and start nothing new. */
@@ -473,6 +508,10 @@ export async function runQuickLoop(
     // spent choosing what to fetch (that turn and the fetches were ~2.7 s of a 6.6 s median TTFT).
     // A follow-up's as-typed results are likely off-topic, so it gets results only, as before.
     const withPages = r.sq === undefined && !followUp;
+    // The same questions may skip research, so their memory turn runs whether or not research follows,
+    // and it alone saves: two turns deciding would save one statement twice. A follow-up keeps
+    // save_memory in its research turn, which sees the thread ("yes, remember that").
+    const remembers = withPages;
     const [web, docs] = await Promise.all([
       useWeb
         ? callTool('web_search', { query: r.query }, `${tag}, the question as typed`, r, { withPages })
@@ -480,7 +519,8 @@ export async function runQuickLoop(
       useDocs
         ? callTool('search_documents', { query: r.query }, `${tag}, space ${ctx.spaceId}`, r)
         : undefined,
-      recall
+      recall,
+      remembers ? rememberIfStated(r.query) : undefined
     ]);
     let opening = [
       inThread ? `Earlier in this conversation:\n${historyText(history)}` : '',
@@ -498,7 +538,7 @@ export async function runQuickLoop(
     if (known) opening = `${known}\n\n${opening}`;
     const messages: Anthropic.MessageParam[] = [{ role: 'user', content: opening }];
     // A sub-question never saves memory: four of them would save the same fact four times.
-    const tools = r.sq ? toolsFor(ctx).filter((t) => t.name !== 'save_memory') : toolsFor(ctx);
+    const tools = r.sq || remembers ? toolsFor(ctx).filter((t) => t.name !== 'save_memory') : toolsFor(ctx);
 
     const docsFull = () => !useWeb && r.docLists.flat().length >= env.ragTopK;
     // The same "enough to answer from" test the research loop ends on, applied before its first turn.
