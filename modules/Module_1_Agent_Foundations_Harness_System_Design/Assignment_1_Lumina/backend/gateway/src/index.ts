@@ -19,7 +19,7 @@ import cors from 'cors';
 import { pinoHttp } from 'pino-http';
 import pino from 'pino';
 import { randomUUID } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import {
   HealthResponse,
   REQUEST_HEADER,
@@ -319,34 +319,32 @@ const askStream: express.RequestHandler = async (req, res) => {
   }
 };
 
-// ---------------------------------------------------------------- everything else: 501
+// ---------------------------------------------------------------- /evals/report.json
 
 /**
- * Every contract route answers 501 until you implement it. The UI renders that as
- * "not implemented yet", so the interface is your progress bar: each route you finish
- * lights up a piece of the product.
+ * The file /fde-lumina-eval writes (reports/report.json), bundled into the gateway's image, so
+ * a new report goes live with a gateway redeploy. Read per request, not at boot, so a local
+ * eval run shows up without a restart. Until the eval has run there is nothing to serve: 404.
  */
-const notImplemented = (route: string) => (_req: express.Request, res: express.Response) => {
-  res.status(501).json({
-    error: `not implemented yet: ${route}. Build it in backend/gateway/src/.`,
-    status: 501,
-    requestId: String(res.locals.requestId)
-  });
+const serveReport: express.RequestHandler = (_req, res) => {
+  if (!existsSync(env.reportPath)) {
+    res.status(404).json({
+      error: 'no report yet: run /fde-lumina-eval, then redeploy the gateway',
+      status: 404,
+      requestId: String(res.locals.requestId)
+    });
+    return;
+  }
+  res.type('application/json').send(readFileSync(env.reportPath, 'utf8'));
 };
 
-/** Routes that are not plain JSON, still 501 until their pass-through is built. */
-const NOT_YET = new Set(['GET /evals/report.json']);
-
+const REPORT = 'GET /evals/report.json';
 const ASK = 'POST /threads/:threadId/ask';
 /** The one route whose body is streamed through unparsed (multipart, up to 25 MB). */
 const UPLOAD = 'POST /spaces/:spaceId/documents';
 
 const handlerFor = (key: string): express.RequestHandler =>
-  NOT_YET.has(key)
-    ? notImplemented(key)
-    : key === ASK
-      ? askStream
-      : proxy(key === UPLOAD ? 'stream' : 'json');
+  key === REPORT ? serveReport : key === ASK ? askStream : proxy(key === UPLOAD ? 'stream' : 'json');
 
 for (const route of ROUTES) {
   if (route.path === '/health') continue;
@@ -393,6 +391,6 @@ app.use(
 app.listen(env.port, () => {
   log.info(
     { port: env.port, agentUrl: env.agentUrl, cors: env.corsOrigins },
-    'gateway up — every route but /health returns 501 until you build it'
+    'gateway up'
   );
 });

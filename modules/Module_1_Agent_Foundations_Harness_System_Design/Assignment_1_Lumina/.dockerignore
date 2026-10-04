@@ -1,0 +1,11 @@
+# Keys stay in Fly secrets, never in the image.
+.env
+.env.*
+**/node_modules
+**/dist
+runs
+reports
+!reports/report.json
+*.log
+.DS_Store
+.claude

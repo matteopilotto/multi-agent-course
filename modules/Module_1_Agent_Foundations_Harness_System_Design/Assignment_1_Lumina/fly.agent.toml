@@ -1,0 +1,49 @@
+# The agent service and the jobs worker. PRIVATE: no [http_service] or [[services]], so Fly
+# gives this app no public IP. It holds the provider keys and enforces the deep-search cap, so
+# only the gateway may reach it, over Fly's private network at
+# http://matteopilotto-lumina-agent.internal:8000.
+# Keys: fly secrets set -c fly.agent.toml MONGODB_URI=... ANTHROPIC_API_KEY=... OPENAI_API_KEY=... TAVILY_API_KEY=...
+app = "matteopilotto-lumina-agent"
+primary_region = "iad" # Atlas answers from the US east coast
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  NODE_ENV = "production"
+  PORT_AGENT = "8000"
+  MONGODB_DB = "lumina"
+  VECTOR_BACKEND = "atlas-vector-search"
+  LLM_PROVIDER = "anthropic"
+  LLM_MODEL = "claude-sonnet-5-5"
+  SEARCH_PROVIDER = "tavily"
+  SEARCH_CACHE_TTL_SECONDS = "21600"
+  EMBEDDING_MODEL = "text-embedding-3-small"
+  DEEP_SUB_QUESTIONS_MIN = "3"
+  DEEP_SUB_QUESTIONS_MAX = "6"
+  DEEP_DAILY_CAP = "5"
+  MAX_TOOL_CALLS = "8"
+  MAX_WALL_CLOCK_SEC = "90"
+  MAX_TOOL_CALLS_DEEP = "24"
+  MAX_WALL_CLOCK_SEC_DEEP = "240"
+  LOG_LEVEL = "info"
+
+[processes]
+  app = "node dist/index.js"
+  worker = "node dist/worker.js"
+
+# 1 GB each: jsdom (page checks) and pdfjs (ingest) are heavy.
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "1gb"
+  processes = ["app", "worker"]
+
+[checks]
+  [checks.health]
+    type = "http"
+    port = 8000
+    path = "/health"
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "30s"
+    processes = ["app"]

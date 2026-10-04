@@ -23,5 +23,7 @@ export const env = {
 
   logLevel: process.env.LOG_LEVEL ?? 'info',
   /** Serve the built UI from the gateway in production so one host serves / and /evals. */
-  webDist: resolve(process.cwd(), '../../web/dist')
+  webDist: resolve(process.cwd(), '../../web/dist'),
+  /** What GET /evals/report.json serves: the eval's output, at the assignment root. */
+  reportPath: process.env.REPORT_PATH ?? resolve(process.cwd(), '../../reports/report.json')
 } as const;

@@ -1,0 +1,40 @@
+# The gateway: the only public backend. It holds no provider key.
+# CORS_ORIGINS must list the Vercel URL of the UI.
+app = "matteopilotto-lumina-gw"
+primary_region = "iad" # next to the agent
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  NODE_ENV = "production"
+  PORT_GATEWAY = "8787"
+  AGENT_URL = "http://matteopilotto-lumina-agent.internal:8000"
+  CORS_ORIGINS = "https://matteopilotto-lumina.vercel.app"
+  RATE_LIMIT_PER_MINUTE = "30"
+  LOG_LEVEL = "info"
+  REPORT_PATH = "/app/reports/report.json"
+
+[processes]
+  app = "node /app/backend/gateway/dist/index.js"
+
+[http_service]
+  internal_port = 8787
+  force_https = true
+  # Graders run the eval whenever their window opens: a stopped machine scores what it shows.
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+  [[http_service.checks]]
+    method = "GET"
+    path = "/health"
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "15s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
+  processes = ["app"]
