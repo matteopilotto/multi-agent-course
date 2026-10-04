@@ -19,3 +19,4 @@ One entry per session, in `docs/journal/YYYY-MM-DD-short-title.md`.
 - [2026-10-04 — LUMINA: the fourth and last bench, two fixes that never fired, and pages in the wrong language](docs/journal/2026-10-04-lumina-fourth-bench-wrap-up.md)
 - [2026-10-04 (later) — LUMINA: Enter to send, and a revert because `web/` is not mine to edit](docs/journal/2026-10-04-lumina-fourth-bench-wrap-up.md)
 - [2026-10-04 (evening) — LUMINA: "chapter 14 was not there", a title that searched the cover, and a research turn only where it pays](docs/journal/2026-10-04-lumina-fourth-bench-wrap-up.md)
+- [2026-10-04 (night) — LUMINA: the bench against the deployed app, a 202 miss that is the Atlantic, and the report](docs/journal/2026-10-04-lumina-fourth-bench-wrap-up.md)
