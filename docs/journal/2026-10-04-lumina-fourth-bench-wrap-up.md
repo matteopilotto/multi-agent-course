@@ -66,3 +66,63 @@ third run. Change no code before or during it, and diagnose any miss afterwards.
 
 **ADR candidates:**
 - None from this session: it changed no code.
+
+---
+
+# 2026-10-04 (later) — LUMINA: Enter to send, and a revert because `web/` is not mine to edit
+
+## Goal
+In the question box, Enter should send the question and Shift + Enter should add a new line.
+Then deploy the change.
+
+## Context
+- The provided UI's `Composer` (`web/src/components/Composer.tsx`) sent only on Cmd/Ctrl +
+  Enter. Plain Enter added a new line.
+- This entry covers only this session. The seven commits between `fd83d3a` and this session
+  (`731b01d` deploy through `8cc720e` freshness fix) came from other sessions that were not
+  journaled. Their reasons are in the commit messages and `progress/learner-progress.md`, not
+  here.
+
+## What was done
+- **`1bba69e`**: in the textarea's `onKeyDown`, Enter without Shift called `preventDefault()`
+  and the same `submit()` as the Ask button. That kept the busy and empty-input checks, and
+  Cmd/Ctrl + Enter still sent. An Enter during IME composition (`e.nativeEvent.isComposing`)
+  was left alone, so picking a Japanese or Chinese candidate would not send. The placeholder
+  was updated. **Verified:** web typecheck and lint passed. **Not verified:** never tried in a
+  browser.
+- **The deploy did not happen.** I asked for Fly. Claude checked first and found two problems:
+  - The `Dockerfile` deletes `web/`, so Fly runs only the agent and gateway and a Fly deploy
+    would not ship the change. The UI is on Vercel.
+  - `AGENTS.md:21-23` lists `web/` as DO NOT EDIT. `SPEC.md:333` makes "provided `web/` …
+    edited" an auto-flagged red line.
+- **`8fd6d36`** reverts `1bba69e`. **Verified:** `git diff 1bba69e~1 HEAD` is empty, so `web/`
+  matches the provided version. Nothing deployed, nothing pushed.
+
+## Decisions
+- **Revert (option A)** over deploying to Vercel and accepting the flag (B), or keeping the
+  commit undeployed (C). Claude recommended A because the red line is graded. I chose A.
+- **A revert commit, not a history rewrite:** *rationale not discussed*. The grader checks files,
+  and `web/` files now match the provided version.
+
+## Dead ends
+- The change itself. Claude edited `web/` without checking `AGENTS.md`'s do-not-edit list,
+  although `progress/learner-progress.md` already called `web/` a red line in the Vercel notes.
+  The problem only surfaced at deploy time.
+
+## Learnings
+- **Check the do-not-edit list before touching a provided folder**, even for a one-line UX fix.
+  A fix that looks harmless can still hit a graded red line.
+- **Where a change deploys follows the folder:** `web/` goes to Vercel (a static build against
+  the gateway), and the agent and gateway go to Fly. "Deploy to Fly" ships no UI change.
+
+## Open questions and next steps
+- Enter-to-send stays out of scope while `web/` is provided. SPEC lists a learner-built UI
+  replacing `web/` as a stretch option, and that would be the place for it.
+- Still open from the progress file: the quick answer prompt does not forbid markdown, so a
+  list answer shows `**` in the plain-text UI.
+- Submission, per the progress file: the app is now deployed (`731b01d`). Still open are
+  `/fde-lumina-eval` against the deployed gateway (a paid bench rerun), the recording, the
+  "How I ran it" notes, and provider spend limits.
+
+**ADR candidates:**
+- None: the only code change was reverted.

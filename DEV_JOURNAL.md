@@ -17,3 +17,4 @@ One entry per session, in `docs/journal/YYYY-MM-DD-short-title.md`.
 - [2026-09-30 — LUMINA: the second full bench, a memory write the speed-up skipped, and one retry for OpenAI](docs/journal/2026-09-30-lumina-second-bench-memory-retry.md)
 - [2026-09-30 (later) — LUMINA: the grounding miss, snippets made of markdown, and pages only a browser can read](docs/journal/2026-09-30-lumina-second-bench-memory-retry.md)
 - [2026-10-04 — LUMINA: the fourth and last bench, two fixes that never fired, and pages in the wrong language](docs/journal/2026-10-04-lumina-fourth-bench-wrap-up.md)
+- [2026-10-04 (later) — LUMINA: Enter to send, and a revert because `web/` is not mine to edit](docs/journal/2026-10-04-lumina-fourth-bench-wrap-up.md)
