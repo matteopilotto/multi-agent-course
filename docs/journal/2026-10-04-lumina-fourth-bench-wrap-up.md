@@ -126,3 +126,84 @@ Then deploy the change.
 
 **ADR candidates:**
 - None: the only code change was reverted.
+
+---
+
+# 2026-10-04 (evening) — LUMINA: "chapter 14 was not there", a title that searched the cover, and a research turn only where it pays
+
+## Goal
+On the deployed app, "what are the main takeaways of chapter 14 of the book 'software design for
+python programmers'?" answered that the search did not surface chapter 14, and the whole book
+was indexed. Find out why, fix it, and deploy.
+
+## Context
+- The Space held `software-design-python.pdf` (458 pages, 780 chunks). Midway I uploaded
+  `fluent-python.pdf` (1011 pages, 1755 chunks) to test the fix with two books.
+- Claude ran the `diagnosing-bugs` skill and built a read-only loop against Atlas before
+  forming any theory.
+
+## What was done
+- **Diagnosis** (verified): the production run was a deep search. All three sub-questions began
+  with the book title, and all cited pages were front matter (pp. 18–35) or the back cover
+  (p. 458). Chapter 14 is pp. 352–384. Replayed through `hybridSearchChunks`, those queries
+  missed 3/3; without the title, "chapter 14 main topics" hit. The title's words match the
+  pages *about* the book. `docsFull()` then skipped the research turn, because hybrid search
+  always returns 5 passages.
+- **`1d7f8cc`**:
+  - `search_documents` takes an optional `document` (enum of the Space's file names). The filter
+    runs after `$vectorSearch`/`$search`, which read 400 chunks deep (`RAG_DOC_FILTER_DEPTH`).
+  - The planner can limit a sub-question to one document and keeps titles out of its questions.
+  - `namesDocumentPart` (every word of a file name, or "chapter 14"/"page 12"/"appendix B")
+    gives that question a research turn.
+  - A document search gets one more turn to be read, and only the latest turn's lists reach the
+    answer.
+  - DESIGN.md trade-off 7.
+- **Local checks** (verified, one run each):
+  - Quick: 5/5 sources from chapter 14, TTFT 6.7–8.9 s.
+  - Deep: 8/16 sources from chapter 14, TTFT 11.3 s, $0.063.
+  - Fluent Python in `auto` mode: limited to that book.
+  - 30 bench gold questions: recall@5 30/30, TTFT p50 2.26 s, p95 2.66 s, no re-searches.
+- **Deployed** the agent app (`fly deploy -c fly.agent.toml --remote-only --ha=false`), both
+  machines healthy. One live quick run answered from chapter 14 with 3 of 5 sources from it,
+  TTFT 3.9 s (verified, one run).
+
+## Decisions
+- **Filter by document, not strip the title** (Claude's first option 1). I asked what happens
+  with several books. Claude said a bare "chapter 14" would match every book's chapter 14, and
+  the two-book loop confirmed it: unfiltered, it returned only Fluent Python pages.
+- **Filter after the search:** `scripts/indexes.json` is DO NOT EDIT, and it has no `docId`
+  filter field. Depths of 100, 400 and 2000 gave the same results on these books.
+- **Narrow the research turn to a word-list trigger.** Giving every document question the turn
+  made TTFT p95 5.8–6.1 s, because the model re-searched 20–24 of 30 gold questions whose
+  first search was already right. Claude recommended the trigger, and I approved.
+- **Another turn after a model search, and the latest lists only:** the first re-search found
+  the contents page, and the next used the chapter title it read there. Fused with the earlier
+  lists, the contents pages took half of the top five.
+- **File name as the only title:** Claude proposed a PDF metadata title, but it was not built;
+  *rationale not discussed*.
+
+## Dead ends
+- A prompt line telling the model passages are cut to 300 characters: re-searches went from
+  20/30 to 24/30.
+- `numCandidates` above 10000 makes Atlas throw; it is clamped now.
+- npx fetched Prettier 3.9, which reflowed unrelated lines; Claude reverted them.
+- Tooling slips: the bench `pool()` returns `{ok, value}` (scored again from Mongo),
+  `createdAt` is a `Date` (again), and zsh does not split `$VAR` (the run-log delete was redone).
+
+## Learnings
+- **A full top-k is not a relevant top-k.** "5 passages" told the harness nothing.
+- **Title words find the pages about a document, not the part asked about.**
+- **A turn offered is a turn used:** Haiku re-searched when given the chance, and prompting did
+  not stop it, so the gate went in the harness.
+
+## Open questions and next steps
+- The live run hit `MAX_DOC_SEARCHES=3` with two parallel searches, before the title search.
+  Raising it to 4 is proposed, not done.
+- In deep search, sub-questions still land on contents pages.
+- `progress/learner-progress.md` not yet updated.
+- Test threads: 8 on `u_4tpnxice`, 91 on `bench`.
+
+**ADR candidates:**
+- Limiting a search to one document by filtering after the search, because the provided indexes
+  filter only by Space and user.
+- A word-list trigger, not the model, decides when a document question gets a research turn.
