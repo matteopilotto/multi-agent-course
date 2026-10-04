@@ -15,7 +15,8 @@ evidence file.
    ask the LLM, run the tool it picks, feed the result back, repeat, stream the answer. A quick
    question that stands on its own skips most of that loop: one search brings back the pages as
    well as the links, and the answer is written straight from them. The full loop runs for
-   follow-ups, for deep search, and when that one search comes back thin. Quick and deep search,
+   follow-ups, for deep search, and when that one search comes back thin. A quick message that is
+   only small talk, such as "Hi!" or "thanks", searches nothing and gets a short reply. Quick and deep search,
    memory, and document search all live here. Nobody outside can reach it, only the gateway.
 4. **Jobs worker**, its own process, same code as the agent service. It picks up upload jobs
    from Mongo and does the slow work: parse the file, split it into chunks, embed them, write
@@ -257,6 +258,15 @@ fewer moving parts and paid for it somewhere else.
    not find on their pages were language versions of a page (Danish, French, Chinese) that the
    search engine had handed me in English, while a plain fetch of the same address returns the
    translation. Grounding came out at 0.949 against 0.95, and I stopped there.
+   Searching first also searched messages that ask nothing. On the deployed app "Hi!" read four
+   pages about the word "hi", and the answer explained the greeting from them. So another fixed
+   list of word patterns now catches a quick message made only of greetings, thanks, goodbyes, or
+   "who are you" and "what can you do". It searches nothing, still looks up memory (a reply may use
+   a name), sends an empty source list, and is answered in a sentence or two for about $0.002.
+   What I gave up: small talk that is not on the list is still searched as before, and the list
+   only matches whole messages, so "hi, what is RAG?" is searched like any question. I chose a
+   list over a model turn because the turn would add time before the first word of every
+   question, and that is the number I am already missing.
 
 The one I am least sure about is number 4. For one cohort's load the crash isolation may never
 matter, and a `worker_threads` thread inside the agent process would be one fewer thing to deploy
