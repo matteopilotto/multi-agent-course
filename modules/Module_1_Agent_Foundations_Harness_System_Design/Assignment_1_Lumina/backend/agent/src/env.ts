@@ -18,7 +18,7 @@ export const env = {
     | 'mongo-cosine-scan',
 
   llmProvider: process.env.LLM_PROVIDER ?? 'anthropic',
-  llmModel: process.env.LLM_MODEL ?? 'claude-sonnet-5',
+  llmModel: process.env.LLM_MODEL ?? 'claude-sonnet-5-5',
   llmModelResearch: process.env.LLM_MODEL_RESEARCH ?? 'claude-haiku-4-5-20251001',
   llmModelPlanner: process.env.LLM_MODEL_PLANNER ?? 'claude-haiku-4-5-20251001',
 

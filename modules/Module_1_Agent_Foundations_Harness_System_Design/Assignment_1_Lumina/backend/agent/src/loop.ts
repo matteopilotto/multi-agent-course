@@ -827,7 +827,9 @@ export async function runQuickLoop(
     // Sonnet 5 thinks by default on a hard prompt: those tokens count toward max_tokens and never stream
     // as text. Measured: ~1,100 of them cut a 1,385-token deep answer at 2,500, and they sit in front of
     // the first token. The harness already planned; this call only writes from sources it was given.
-    thinking: { type: 'disabled' },
+    // Sonnet 5.5 rejects 'disabled' (400) and takes 'between_tools': no thinking before the response,
+    // only short updates between tool calls, and this call has no tools. SDK 0.124 does not type it yet.
+    thinking: { type: 'between_tools' } as unknown as Anthropic.ThinkingConfigParam,
     system: [
       plan ? DEEP_ANSWER_SYSTEM : ANSWER_SYSTEM,
       terminated === 'cap' ? CAP_NOTE : '',
