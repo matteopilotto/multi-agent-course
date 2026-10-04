@@ -11,6 +11,10 @@ export type SearchResult = { title: string; url: string; snippet: string; conten
  */
 export type SearchMode = 'basic' | 'fast-pages';
 
+/** Tavily's time_range: only pages published in the last day, week or month. */
+export const RECENCIES = ['day', 'week', 'month'] as const;
+export type Recency = (typeof RECENCIES)[number];
+
 /** One HTTP call to Tavily. Throws on a non-2xx: fail loud, never return a plausible empty. */
 async function tavily<T>(path: string, body: Record<string, unknown>): Promise<T> {
   const r = await fetch(`https://api.tavily.com/${path}`, {
@@ -33,14 +37,18 @@ async function tavily<T>(path: string, body: Record<string, unknown>): Promise<T
   return (await r.json()) as T;
 }
 
-export async function webSearch(query: string, mode: SearchMode = 'basic'): Promise<SearchResult[]> {
+export async function webSearch(
+  query: string,
+  mode: SearchMode = 'basic',
+  recency?: Recency
+): Promise<SearchResult[]> {
   type Raw = { results: { title: string; url: string; content: string; raw_content?: string | null }[] };
-  const data = await tavily<Raw>(
-    'search',
-    mode === 'fast-pages'
+  const data = await tavily<Raw>('search', {
+    ...(mode === 'fast-pages'
       ? { query, max_results: 5, search_depth: 'fast', include_raw_content: 'markdown' } // markdown, like extract
-      : { query, max_results: 5 }
-  );
+      : { query, max_results: 5 }),
+    ...(recency ? { time_range: recency } : {})
+  });
   return data.results.map((x) => ({
     title: x.title,
     url: x.url,
@@ -71,7 +79,13 @@ export const TOOL_SCHEMAS = [
       properties: {
         query: {
           type: 'string',
-          description: 'A focused search query'
+          description: 'A focused search query. Never put a date in it: use recency instead.'
+        },
+        recency: {
+          type: 'string',
+          enum: [...RECENCIES],
+          description:
+            'Only pages published in the last day, week or month. Only for a question about the present whose results are out of date; it returns fewer results, so prefer week unless the question is about today.'
         }
       },
       required: ['query']

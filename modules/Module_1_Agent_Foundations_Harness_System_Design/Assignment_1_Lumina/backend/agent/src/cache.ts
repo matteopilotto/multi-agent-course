@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import pino from 'pino';
-import type { SearchMode, SearchResult } from './tools.js';
+import type { Recency, SearchMode, SearchResult } from './tools.js';
 import { COLLECTIONS, SearchCacheDoc } from '@lumina/contract';
 import { db } from './db.js';
 import { env } from './env.js';
@@ -99,22 +99,29 @@ export async function writeMongo(
 
 const lru = new SearchLru();
 
-const THIS_YEAR = new Date().getFullYear();
-
-/** "today", "latest", or a year at or after this one: a six-hour-old result is the wrong answer. */
+/**
+ * "today", "latest", "current", or a year at or after this one: a six-hour-old result is the wrong
+ * answer, and so is a page that only calls itself "today". The year is read per call, like the
+ * planner's date: one read at startup goes stale on a long-lived deploy.
+ */
 export function isTimeSensitive(query: string): boolean {
   const q = normalizeQuery(query);
-  if (/\b(today|latest|now|yesterday|this (week|month|year))\b/.test(q)) return true;
+  if (/\b(today|tonight|latest|now|current|currently|yesterday|this (week|month|year))\b/.test(q)) return true;
   const years = q.match(/\b(19|20)\d{2}\b/g) ?? []; // like re.findall
-  return years.some((y) => Number(y) >= THIS_YEAR);
+  return years.some((y) => Number(y) >= new Date().getFullYear());
 }
 
 export type CachedSearch = { results: SearchResult[]; cached: boolean; note?: string };
 
 /** LRU, then Mongo, then the provider. Fills the tiers above whichever one answered. */
-export async function cachedWebSearch(query: string, mode: SearchMode = 'basic'): Promise<CachedSearch> {
-  if (isTimeSensitive(query)) {
-    const results = await webSearch(query, mode); // no read, no write: the row would never be served anyway
+export async function cachedWebSearch(
+  query: string,
+  mode: SearchMode = 'basic',
+  recency?: Recency
+): Promise<CachedSearch> {
+  // A search asked to be recent is time-sensitive whatever its words ("world news headlines").
+  if (recency || isTimeSensitive(query)) {
+    const results = await webSearch(query, mode, recency); // no read, no write: the row would never be served anyway
     return { results, cached: false, note: 'time-sensitive query, cache bypassed' };
   }
   const provider = env.searchProvider;

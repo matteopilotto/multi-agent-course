@@ -11,9 +11,9 @@ import type {
   TraceEvent
 } from '@lumina/contract';
 import { env, secrets } from './env.js';
-import { TOOL_SCHEMAS, fetchPage } from './tools.js';
+import { RECENCIES, TOOL_SCHEMAS, fetchPage } from './tools.js';
 import { ProviderError } from './errors.js';
-import { cachedWebSearch } from './cache.js';
+import { cachedWebSearch, isTimeSensitive } from './cache.js';
 import { send } from './sse.js';
 import pino from 'pino';
 import { recallMemory, saveMemory, type Recalled } from './memory.js';
@@ -34,8 +34,9 @@ Results for the question may already be in the first message. Which tools you ha
 1. With web tools: call fetch_page on the 2 to 4 most relevant results. Only fetched pages can be cited later.
 2. With search_documents: the passages it returns are already citable and there is nothing to fetch. Call it again, worded differently, only if the passages clearly miss the question.
 3. Call web_search again only if the results clearly do not cover the question.
-4. When you have read enough, reply with the single word READY.
-5. If the user states a durable fact or preference about themselves, call save_memory with it once. If the user's message is only such a statement, save it and reply READY.`;
+4. If the question is about the present (today, now, current, latest), a result that does not show it is from that time does not cover it: do not fetch it, search again with recency set.
+5. When you have read enough, reply with the single word READY.
+6. If the user states a durable fact or preference about themselves, call save_memory with it once. If the user's message is only such a statement, save it and reply READY.`;
 
 const MEMORY_SYSTEM = `You are the memory step of LUMINA, a search assistant. You never answer the message.
 If the user's message states a durable fact or preference about themselves (how they want answers, what they build with, their role), call save_memory with it once. A question, however specific, states nothing to remember. Anything listed under what you know about the user is already saved.
@@ -71,6 +72,15 @@ const CHAT_SYSTEM = `You are LUMINA, a search assistant: you search the web and 
 The user's message is small talk (a greeting, thanks, a goodbye, or a question about you), not something to look up, so nothing was searched.
 Reply in one or two short, warm sentences, as plain text. If they greeted you, greet them back and invite a question. If they asked who you are or what you can do, say so from the first line above. Cite nothing and never mention sources.
 If you know things about the user, you may use them (for example their name).`;
+
+/** Built per call, like the planner's: a date baked in at startup goes stale on a long-lived deploy. */
+const todayIs = () => `Today is ${new Date().toISOString().slice(0, 10)}.`;
+
+/**
+ * Every answer that has sources. The model did not know the date, so a page titled "Top news today"
+ * from May 2024 answered "what are the top news for today?" as if it were today's.
+ */
+const FRESHNESS = `If the question is about the present (today, now, current, latest), a source answers it only if it shows it is from that time: a date in its title, URL or text. Never present an older page as current. If no source is from that time, say plainly that the search found nothing current, and give what the newest sources say with their dates. Live values such as weather, prices and scores are current only on a page that shows when they were measured.`;
 
 const CAP_NOTE =
   'Tool budget exhausted. Answer now with what you have, and say plainly what you could not verify.';
@@ -364,9 +374,12 @@ export async function runQuickLoop(
     };
     switch (name) {
       case 'web_search': {
+        // Only a value from the schema's enum reaches Tavily; anything else searches without a time filter.
+        const recency = RECENCIES.find((x) => x === input.recency);
         const { results, cached, note } = await cachedWebSearch(
           String(input.query),
-          opts?.withPages ? 'fast-pages' : 'basic'
+          opts?.withPages ? 'fast-pages' : 'basic',
+          recency
         );
         searchHits.push(cached);
         for (const r of results) titles.set(r.url, r.title);
@@ -603,7 +616,11 @@ export async function runQuickLoop(
     // A quick question that stands on its own gets its pages from this search, so no model turn is
     // spent choosing what to fetch (that turn and the fetches were ~2.7 s of a 6.6 s median TTFT).
     // A follow-up's as-typed results are likely off-topic, so it gets results only, as before.
-    const withPages = r.sq === undefined && !followUp;
+    // A question about the present gets results only too: pre-search pages are read by rank, not date,
+    // and a page titled "Top news today" from May 2024 was read and answered as today's. The research
+    // turn knows the date, fetches what is current, and searches again with recency when nothing is.
+    const fresh = useWeb && isTimeSensitive(r.query);
+    const withPages = r.sq === undefined && !followUp && !fresh;
     // The same questions may skip research, so their memory turn runs whether or not research follows,
     // and it alone saves: two turns deciding would save one statement twice. A follow-up keeps
     // save_memory in its research turn, which sees the thread ("yes, remember that").
@@ -663,7 +680,7 @@ export async function runQuickLoop(
       const response = await client.messages.create({
         model: env.llmModelResearch,
         max_tokens: 1024,
-        system: RESEARCH_SYSTEM,
+        system: `${RESEARCH_SYSTEM}\n\n${todayIs()}`,
         tools, // CHANGED: was toolsFor(ctx); a sub-question's toolbelt has no save_memory
         messages
       });
@@ -868,6 +885,8 @@ export async function runQuickLoop(
     thinking: { type: 'between_tools' } as unknown as Anthropic.ThinkingConfigParam,
     system: [
       plan ? DEEP_ANSWER_SYSTEM : smallTalk ? CHAT_SYSTEM : ANSWER_SYSTEM,
+      todayIs(),
+      smallTalk ? '' : FRESHNESS,
       terminated === 'cap' ? CAP_NOTE : '',
       known,
       smallTalk ? '' : `SOURCES:\n${sourceBlock}` // "(no sources were retrieved)" would make the reply about sources
