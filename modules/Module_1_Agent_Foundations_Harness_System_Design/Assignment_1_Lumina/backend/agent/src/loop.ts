@@ -82,6 +82,8 @@ type Research = {
   /** This question's own tool calls, so the run log can list them together (see the fan-out). */
   log: RunLog['toolCalls'];
   pages: Page[];
+  /** Pre-search results with text that skipAsPage turned away: pages a plain reader cannot quote from. */
+  skippedPages: number;
   docLists: ChunkHit[][]; // one ranked list per search_documents call, fused at source-build time
   seenChunks: Set<string>;
   docSearches: number;
@@ -94,6 +96,7 @@ const newResearch = (query: string, budget: number, sq?: number): Research => ({
   calls: 0,
   log: [],
   pages: [],
+  skippedPages: 0,
   docLists: [],
   seenChunks: new Set(),
   docSearches: 0,
@@ -346,7 +349,8 @@ export async function runQuickLoop(
         const read = new Set<string>();
         const skipped: string[] = [];
         if (opts?.withPages) {
-          const { pages } = own();
+          const research = own();
+          const { pages } = research;
           for (const r of results) {
             if (read.size >= PRESEARCH_PAGES) break;
             if (!r.content || r.content.length < PRESEARCH_PAGE_MIN_CHARS) continue;
@@ -359,6 +363,7 @@ export async function runQuickLoop(
             pages.push({ url: r.url, title: r.title, text: r.content.slice(0, 8000) }); // fetchPage's cap
             read.add(r.url);
           }
+          research.skippedPages += skipped.length;
           checkLater(results.filter((r) => r.content).map((r) => r.url)); // behind the answer, for the next one
         }
         const output = results
@@ -595,10 +600,17 @@ export async function runQuickLoop(
     const tools = r.sq || remembers ? toolsFor(ctx).filter((t) => t.name !== 'save_memory') : toolsFor(ctx);
 
     const docsFull = () => !useWeb && r.docLists.flat().length >= env.ragTopK;
-    // The same "enough to answer from" test the research loop ends on, applied before its first turn.
-    const skipResearch = !followUp && (r.pages.length >= 2 || docsFull());
+    // The same "enough to answer from" test the research loop ends on, applied before its first turn,
+    // plus one case: one page read and the rest of the results skipped as browser-only. A research
+    // turn there re-searches and fetches the skipped pages anyway (the third bench: the Tavily extract
+    // question ran 7 tool calls, 14.7 s to the first token, and its fetch of community.tavily.com failed).
+    const skipResearch =
+      !followUp && (r.pages.length >= 2 || (r.pages.length === 1 && r.skippedPages > 0) || docsFull());
     if (skipResearch)
-      log.debug({ phase: 'research', sq: r.sq, skipped: true, pages: r.pages.length }, 'pre-search is enough');
+      log.debug(
+        { phase: 'research', sq: r.sq, skipped: true, pages: r.pages.length, skippedPages: r.skippedPages },
+        'pre-search is enough'
+      );
 
     // ---- phase 1: research. Tools on. Nothing streams but the trace.
     while (!skipResearch) {
