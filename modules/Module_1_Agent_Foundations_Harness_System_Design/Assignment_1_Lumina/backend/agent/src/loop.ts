@@ -66,6 +66,12 @@ Every sentence must carry a fact, a comparison, or a judgement the sources suppo
 Earlier turns of the conversation may precede the question. The citation numbers in earlier answers point at sources that are no longer listed: never reuse them.
 If you know things about the user, let their preferences shape the answer.`;
 
+/** Small talk only (see isSmallTalk): nothing was searched, so there is nothing to cite and no "the sources do not cover this". */
+const CHAT_SYSTEM = `You are LUMINA, a search assistant: you search the web and the user's own documents (Spaces) and answer with numbered citations, and deep search splits a bigger question into parts and researches each one.
+The user's message is small talk (a greeting, thanks, a goodbye, or a question about you), not something to look up, so nothing was searched.
+Reply in one or two short, warm sentences, as plain text. If they greeted you, greet them back and invite a question. If they asked who you are or what you can do, say so from the first line above. Cite nothing and never mention sources.
+If you know things about the user, you may use them (for example their name).`;
+
 const CAP_NOTE =
   'Tool budget exhausted. Answer now with what you have, and say plainly what you could not verify.';
 
@@ -127,6 +133,26 @@ export function needsThread(query: string): boolean {
   return /^(what|how|why|when|where|who|which|is|are|was|were|does|do|did|can|could|should|would|will)( \w+)? (it|its|they|them|their|this|that)\b/.test(
     q
   );
+}
+
+const SMALL_TALK_PHRASE =
+  "(?:hi|hello|hey|hiya|howdy|yo|greetings|good (?:morning|afternoon|evening)|thanks|thank you|thx|ty|cheers|ok|okay|cool|great|nice|perfect|got it|bye|goodbye|see you|see ya|how are you(?: doing)?(?: today)?|how's it going|who are you|what are you|what can you do)(?: (?:there|lumina|again|all|so much|a lot))?";
+const SMALL_TALK = new RegExp(`^${SMALL_TALK_PHRASE}(?: ${SMALL_TALK_PHRASE})*$`);
+
+/**
+ * A message that is only small talk: "Hi!", "thanks, bye", "hey lumina, what can you do?". Every
+ * quick question is searched as typed before any model reads it, so "Hi!" fetched pages about the
+ * word "hi" and the answer explained them. Only whole messages match: "hi, what is RAG?" has a
+ * question in it and is searched. A miss costs the old behaviour; a false hit would answer a real
+ * question with no sources, which is why this is a closed list and not a model turn.
+ */
+export function isSmallTalk(query: string): boolean {
+  const q = query
+    .toLowerCase()
+    .replace(/[^a-z' ]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return SMALL_TALK.test(q);
 }
 
 /** The quick pre-search reads up to this many of its results as pages; a page shorter than the floor is a stub. */
@@ -515,7 +541,14 @@ export async function runQuickLoop(
 
   // ---- phase 0: recall once, as a harness step: memory is about the user, not about any one
   // part of the question. Every research awaits the same promise.
-  const recall = callTool('recall_memory', { query }, 'harness: what is known about this user');
+  // Small talk skips retrieval entirely; quick only, because deep was opted into and has already planned.
+  // The recall still runs: it is the run's trace step, and the reply may use what is known (a name).
+  const smallTalk = ctx.depth === 'quick' && isSmallTalk(query);
+  const recall = callTool(
+    'recall_memory',
+    { query },
+    `harness: what is known about this user${smallTalk ? '; router: small talk, nothing to search' : ''}`
+  );
 
   /**
    * Whether the message states something to remember, decided by a turn whose only tool is
@@ -702,9 +735,12 @@ export async function runQuickLoop(
   // sub-question 6 needs, and 6 is answered from nothing. Quick is one research holding all of it.
   const subQs = plan?.subQuestions ?? [];
   const share = Math.floor((maxCalls - step) / Math.max(subQs.length, 1));
-  const researches = subQs.length
-    ? subQs.map((s) => newResearch(s.question, share, s.i))
-    : [newResearch(query, share)];
+  const researches = smallTalk
+    ? []
+    : subQs.length
+      ? subQs.map((s) => newResearch(s.question, share, s.i))
+      : [newResearch(query, share)];
+  if (smallTalk) await recall; // no research awaits it here, and memoryBlock below reads what it found
 
   // Sub-questions are independent, so they run in parallel, at most env.deepConcurrency at a time.
   // Every lane is awaited before the run ends, even after a failure: no research may still be
@@ -819,7 +855,7 @@ export async function runQuickLoop(
           .join('\n\n')
       : blocks.join('\n\n');
 
-  const maxTokens = plan ? env.deepAnswerMaxTokens : 1024;
+  const maxTokens = plan ? env.deepAnswerMaxTokens : smallTalk ? 256 : 1024;
   const t1 = Date.now();
   const stream = client.messages.stream({
     model: env.llmModel,
@@ -831,10 +867,10 @@ export async function runQuickLoop(
     // only short updates between tool calls, and this call has no tools. SDK 0.124 does not type it yet.
     thinking: { type: 'between_tools' } as unknown as Anthropic.ThinkingConfigParam,
     system: [
-      plan ? DEEP_ANSWER_SYSTEM : ANSWER_SYSTEM,
+      plan ? DEEP_ANSWER_SYSTEM : smallTalk ? CHAT_SYSTEM : ANSWER_SYSTEM,
       terminated === 'cap' ? CAP_NOTE : '',
       known,
-      `SOURCES:\n${sourceBlock}`
+      smallTalk ? '' : `SOURCES:\n${sourceBlock}` // "(no sources were retrieved)" would make the reply about sources
     ]
       .filter(Boolean)
       .join('\n\n'),
