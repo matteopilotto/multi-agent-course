@@ -366,11 +366,15 @@ export async function runQuickLoop(
           research.skippedPages += skipped.length;
           checkLater(results.filter((r) => r.content).map((r) => r.url)); // behind the answer, for the next one
         }
+        // A result skipAsPage turns away is marked in every mode, so a research turn does not pick it
+        // to fetch; fetch_page would be refused anyway (see the research loop).
+        const mark = (url: string) => {
+          if (read.has(url)) return ' (already read)';
+          const skip = skipAsPage(url);
+          return skip ? ` (cannot be read: ${skip}; do not fetch)` : '';
+        };
         const output = results
-          .map(
-            (r, i) =>
-              `${i + 1}. ${r.title}${read.has(r.url) ? ' (already read)' : ''}\n   ${r.url}\n   ${r.snippet.slice(0, 160)}`
-          )
+          .map((r, i) => `${i + 1}. ${r.title}${mark(r.url)}\n   ${r.url}\n   ${r.snippet.slice(0, 160)}`)
           .join('\n');
         const pagesNote = opts?.withPages
           ? `${read.size} page(s) read from the results${skipped.length ? `; skipped ${skipped.join(', ')}` : ''}`
@@ -650,10 +654,16 @@ export async function runQuickLoop(
       let admitted = 0; // counted synchronously in .map order, before any await, exactly like `seen`
       const results: Anthropic.ToolResultBlockParam[] = await Promise.all(
         toolBlocks.map(async (block) => {
-          const nth = (seen.get(block.name) ?? 0) + 1;
-          seen.set(block.name, nth);
-          const refusal =
-            nth > env.maxSameToolInARow
+          // A page the page check knows a plain reader cannot quote from is not fetched: the third
+          // bench's research turn fetched a community.tavily.com thread the check had marked, and it failed.
+          // Checked first, so it uses up neither the per-turn count nor the budget.
+          const unreadable =
+            block.name === 'fetch_page' ? skipAsPage(String((block.input as { url?: unknown }).url)) : undefined;
+          const nth = unreadable ? 0 : (seen.get(block.name) ?? 0) + 1;
+          if (!unreadable) seen.set(block.name, nth);
+          const refusal = unreadable
+            ? `That page cannot be read without a browser (${unreadable}). Pick another result, or work with what you have.`
+            : nth > env.maxSameToolInARow
               ? `At most ${env.maxSameToolInARow} ${block.name} calls per turn. Work with the results you already have, or ask for fewer.`
               : admitted >= remaining
                 ? 'The tool budget for this question is spent. Work with the results you already have.'
