@@ -16,7 +16,10 @@ evidence file.
    question that stands on its own skips most of that loop: one search brings back the pages as
    well as the links, and the answer is written straight from them. The full loop runs for
    follow-ups, for deep search, and when that one search comes back thin. A quick message that is
-   only small talk, such as "Hi!" or "thanks", searches nothing and gets a short reply. Quick and deep search,
+   only small talk, such as "Hi!" or "thanks", searches nothing and gets a short reply. A question
+   about now ("today", "current", "latest") skips the fast path too: the model, told today's date,
+   reads only pages that show they are current, and searches again limited to the last day or week
+   when none are. Quick and deep search,
    memory, and document search all live here. Nobody outside can reach it, only the gateway.
 4. **Jobs worker**, its own process, same code as the agent service. It picks up upload jobs
    from Mongo and does the slow work: parse the file, split it into chunks, embed them, write
@@ -267,6 +270,23 @@ fewer moving parts and paid for it somewhere else.
    only matches whole messages, so "hi, what is RAG?" is searched like any question. I chose a
    list over a model turn because the turn would add time before the first word of every
    question, and that is the number I am already missing.
+   Reading the top-ranked pages also read old pages as new ones. On the deployed app "what are the
+   top news for today?" read four pages titled "Top News Today" from May 2024, October 2025 and
+   December 2025, and the answer presented them as today's news, because no model in a quick answer
+   was told the date. Tavily's time filter alone did not fix it. On five such questions, limiting to
+   the last day returned one or two results, its news mode returned fresh pages that did not answer
+   (a horoscope for "top news"), and putting the date in the search brought back predictions. So
+   every research turn and answer is now told the date, and an answer may call a source current
+   only if the source shows it is. A question the cache already treated as time-sensitive ("today",
+   "latest", "now", and now "current" and "tonight") gets the results without the pages, and a
+   model turn reads only the pages that show a current date, searching again limited to the last
+   day, week or month when none do. I ran the two questions from the deployed app and three more
+   once each, locally: every answer came from pages dated that day or said plainly that nothing was,
+   and a timeless question still took the fast path. What I gave up: 2 to 3 more seconds before the
+   first word on those questions (5.3 to 8.2 seconds, against 3.1 for the timeless one). The
+   trigger is a list of words again, so "current best practices" pays that cost while "who is the
+   president" gets no check. And live values are only as fresh as the search engine's copy of a
+   page: the weather answer used the one page dated that day, where a weather API would be the real fix.
 
 The one I am least sure about is number 4. For one cohort's load the crash isolation may never
 matter, and a `worker_threads` thread inside the agent process would be one fewer thing to deploy
