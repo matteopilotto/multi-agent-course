@@ -251,6 +251,12 @@ fewer moving parts and paid for it somewhere else.
    gave up: such a question is answered from a single page, where a turn of searching might have
    found a second good one. I have checked it on a staged search but not yet on a bench, because
    the same question now returns four readable pages.
+   The fourth bench, the last I ran, did not reach this rule either: the same question took the
+   fast path both times, and every bench question read three or four pages, so the rule is still
+   untested on a bench. It found a different gap instead. About half of the citations it could
+   not find on their pages were language versions of a page (Danish, French, Chinese) that the
+   search engine had handed me in English, while a plain fetch of the same address returns the
+   translation. Grounding came out at 0.949 against 0.95, and I stopped there.
 
 The one I am least sure about is number 4. For one cohort's load the crash isolation may never
 matter, and a `worker_threads` thread inside the agent process would be one fewer thing to deploy
