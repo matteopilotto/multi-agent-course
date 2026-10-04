@@ -240,6 +240,17 @@ fewer moving parts and paid for it somewhere else.
    ones until one good page gets checked. Checking before the answer would have caught every one,
    but on 29 questions it added 2.2 seconds at the median before the sources, and the pages it
    catches were among the slowest to fetch.
+   The third bench found all 202 checkable citations on their pages, and it also found what the
+   skipping cost. Quick search goes straight to the answer only when it has read at least two
+   pages; with fewer, the model gets a turn to search again and fetch. For one question, four of
+   the five results were threads on a site the check had marked, so one page was read. The
+   model's turn then fetched one of those same threads, which failed, and searched again in other
+   words: seven tool calls, about 15 seconds before the first word, more than the $0.05 a quick
+   answer may cost, and the repeat missed the cache because nobody had searched those words
+   before. So one page is now enough when the other results were skipped as unreadable. What I
+   gave up: such a question is answered from a single page, where a turn of searching might have
+   found a second good one. I have checked it on a staged search but not yet on a bench, because
+   the same question now returns four readable pages.
 
 The one I am least sure about is number 4. For one cohort's load the crash isolation may never
 matter, and a `worker_threads` thread inside the agent process would be one fewer thing to deploy
