@@ -114,7 +114,13 @@ export const TOOL_SCHEMAS = [
       properties: {
         query: {
           type: 'string',
-          description: 'What to look for, in the words likely to appear in the documents'
+          description:
+            "What to look for, in the words likely to appear in the documents. Never a document's title: its words match the cover and front matter, not the part you want. Use document for that."
+        },
+        document: {
+          type: 'string',
+          description:
+            'Search only this document: its title exactly as listed. Leave it out to search every document in the Space.'
         }
       },
       required: ['query']

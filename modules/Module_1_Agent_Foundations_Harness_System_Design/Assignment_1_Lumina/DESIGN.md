@@ -15,7 +15,8 @@ evidence file.
    ask the LLM, run the tool it picks, feed the result back, repeat, stream the answer. A quick
    question that stands on its own skips most of that loop: one search brings back the pages as
    well as the links, and the answer is written straight from them. The full loop runs for
-   follow-ups, for deep search, and when that one search comes back thin. A quick message that is
+   follow-ups, for deep search, when that one search comes back thin, and for a question that
+   names one of the user's documents or a chapter or page of one. A quick message that is
    only small talk, such as "Hi!" or "thanks", searches nothing and gets a short reply. A question
    about now ("today", "current", "latest") skips the fast path too: the model, told today's date,
    reads only pages that show they are current, and searches again limited to the last day or week
@@ -176,7 +177,7 @@ query for one of the chunks it just wrote and getting it back. Until then the do
 
 ## Trade-offs
 
-Six decisions where a reasonable engineer would have picked differently. In each case I chose
+Seven decisions where a reasonable engineer would have picked differently. In each case I chose
 fewer moving parts and paid for it somewhere else.
 
 1. **Atlas Vector Search instead of a dedicated vector store** like Pinecone or Qdrant. The
@@ -287,6 +288,34 @@ fewer moving parts and paid for it somewhere else.
    trigger is a list of words again, so "current best practices" pays that cost while "who is the
    president" gets no check. And live values are only as fresh as the search engine's copy of a
    page: the weather answer used the one page dated that day, where a weather API would be the real fix.
+
+7. **A question about the user's documents is answered from one search of the question as typed,
+   unless it names a document or a numbered part of one.** Document search always returns five
+   passages, so five passages do not mean the right five, but a model turn to judge them costs time
+   on every question. On the deployed app, "what are the main takeaways of chapter 14 of the book
+   'software design for python programmers'?" came back with the book's contents, preface and back
+   cover: the title's words match the pages about the book, and "chapter 14" matches the contents
+   page before the chapter itself. The answer said chapter 14 was not there, and the whole book was
+   indexed. Two things changed. The model can now limit a search to one document, the deep-search
+   planner can limit a sub-question to one, and both are told to keep the title out of the search
+   words. And a question that names a document in the Space (every word of its file name, so "Fluent
+   Python" names fluent-python.pdf) or a numbered part ("chapter 14", "page 12", "appendix B") gets a
+   research turn that reads the passages and may search again. On the chapter 14 question its first
+   search found the contents page; its second used the chapter title it read there and returned five
+   pages of chapter 14. Only the latest search's passages reach the answer: fused with the earlier
+   ones, the contents pages took half of the five places. Run locally, the question was answered from
+   chapter 14 in quick search, 6.7 to 8.9 seconds before the first word, and in deep search.
+   What I gave up: I first gave every document question that turn. Recall on 30 bench questions
+   stayed at 30 of 30, but the model searched again on 20 to 24 of them although the first search
+   was already right, and the 95th percentile wait was 5.8 to 6.1 seconds, against 2.7 with the
+   trigger. So the trigger is a list of words again: a chapter named by its title rather than its
+   number, or a book named in words its file name lacks, gets no second search. The file name is the
+   only title I have, so a file called 9781633436039.pdf can be searched alone but never named in a
+   question. Deep search still spends some sub-questions on the contents pages: in one run 8 of 16
+   sources came from the chapter. And the limit to one document is a filter after the search, not in
+   it, because the provided index definitions filter only by Space and user. The vector half reads the
+   Space's 400 nearest chunks and keeps that document's, so in a Space where another document crowds
+   it out, it can come back with fewer than five.
 
 The one I am least sure about is number 4. For one cohort's load the crash isolation may never
 matter, and a `worker_threads` thread inside the agent process would be one fewer thing to deploy

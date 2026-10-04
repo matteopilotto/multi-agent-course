@@ -131,3 +131,21 @@ export async function documentTitles(docIds: string[]): Promise<Map<string, stri
     .toArray();
   return new Map(rows.map((d) => [d._id, d.title]));
 }
+
+/**
+ * The Space's searchable documents, oldest first: what search_documents' `document` may name.
+ * Titles are filenames and may repeat (the same file uploaded twice); a title names all of its copies.
+ */
+export async function spaceDocuments(
+  userId: string,
+  spaceId: string
+): Promise<{ docId: string; title: string }[]> {
+  const rows = await (
+    await documents()
+  )
+    .find({ userId, spaceId, status: 'indexed' })
+    .sort({ createdAt: 1 })
+    .project<{ _id: string; title: string }>({ title: 1 })
+    .toArray();
+  return rows.map((d) => ({ docId: d._id, title: d.title }));
+}

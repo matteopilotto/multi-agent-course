@@ -8,6 +8,14 @@ const chunks = async () => (await db()).collection<ChunkDoc>(COLLECTIONS.chunks)
 export type ChunkHit = { id: string; docId: string; text: string; locator: Locator; score: number };
 
 /**
+ * docId is not a filter field in either Atlas index (scripts/indexes.json declares spaceId and
+ * userId only, and scripts/ is not ours to edit), so a search limited to some documents cannot
+ * filter inside $vectorSearch or $search. It over-fetches across the Space and filters after: the
+ * recall loss the spaceId comment warns about, bounded by how deep the over-fetch goes.
+ */
+const docFilter = (docIds?: string[]) => (docIds?.length ? [{ $match: { docId: { $in: docIds } } }] : []);
+
+/**
  * Dense retrieval over one Space. The spaceId filter lives INSIDE $vectorSearch: a later
  * $match would rank another Space's chunks first and then hide them, which quietly breaks recall.
  * Used by the worker's probe today and by search_documents next.
@@ -16,13 +24,16 @@ export async function vectorSearchChunks(
   spaceId: string,
   userId: string,
   queryVector: number[],
-  k: number
+  k: number,
+  docIds?: string[]
 ): Promise<ChunkHit[]> {
   const col = await chunks();
 
   if (env.vectorBackend === 'mongo-cosine-scan') {
     // Local mongod has no vector index: score the Space's chunks in Node. Fine to a few thousand chunks.
-    const rows = await col.find({ spaceId, userId }).toArray();
+    const rows = await col
+      .find({ spaceId, userId, ...(docIds?.length ? { docId: { $in: docIds } } : {}) })
+      .toArray();
     const dot = (a: number[], b: number[]) => a.reduce((s, x, i) => s + x * (b[i] ?? 0), 0);
     return rows
       .map((c) => ({
@@ -36,6 +47,7 @@ export async function vectorSearchChunks(
       .slice(0, k);
   }
 
+  const limit = docIds?.length ? env.ragDocFilterDepth : k;
   return col
     .aggregate<ChunkHit>([
       {
@@ -43,11 +55,13 @@ export async function vectorSearchChunks(
           index: SEARCH_INDEXES.chunksVector,
           path: 'embedding',
           queryVector,
-          numCandidates: Math.max(100, k * 20),
-          limit: k,
+          numCandidates: Math.min(10000, Math.max(100, limit * 20)), // Atlas rejects more than 10000
+          limit,
           filter: { spaceId: { $eq: spaceId }, userId: { $eq: userId } }
         }
       },
+      ...docFilter(docIds),
+      { $limit: k },
       {
         $project: { _id: 0, id: '$_id', docId: 1, text: 1, locator: 1, score: { $meta: 'vectorSearchScore' } }
       }
@@ -65,7 +79,8 @@ export async function textSearchChunks(
   spaceId: string,
   userId: string,
   query: string,
-  k: number
+  k: number,
+  docIds?: string[]
 ): Promise<ChunkHit[]> {
   const col = await chunks();
 
@@ -76,7 +91,9 @@ export async function textSearchChunks(
       .toLowerCase()
       .split(/\W+/)
       .filter((t) => t.length > 2);
-    const rows = await col.find({ spaceId, userId }).toArray();
+    const rows = await col
+      .find({ spaceId, userId, ...(docIds?.length ? { docId: { $in: docIds } } : {}) })
+      .toArray();
     return rows
       .map((c) => ({
         id: c._id,
@@ -104,6 +121,8 @@ export async function textSearchChunks(
           }
         }
       },
+      // BM25 has no top-k to over-fetch: $search streams every match in score order, and the filter reads on until k pass.
+      ...docFilter(docIds),
       { $limit: k },
       { $project: { _id: 0, id: '$_id', docId: 1, text: 1, locator: 1, score: { $meta: 'searchScore' } } }
     ])
@@ -141,15 +160,18 @@ export function rrf(lists: ChunkHit[][], k: number, rrfK: number): ChunkHit[] {
  *
  * Both branches fail loud. An embeddings outage is a ProviderError and ends the run as a 502,
  * never a doc question that quietly answers from the web instead.
+ *
+ * docIds limits the search to those documents (see docFilter); undefined searches the whole Space.
  */
 export async function hybridSearchChunks(
   spaceId: string,
   userId: string,
-  query: string
+  query: string,
+  docIds?: string[]
 ): Promise<ChunkHit[]> {
   const [dense, sparse] = await Promise.all([
-    embed(query).then((v) => vectorSearchChunks(spaceId, userId, v, env.ragCandidates)),
-    textSearchChunks(spaceId, userId, query, env.ragCandidates)
+    embed(query).then((v) => vectorSearchChunks(spaceId, userId, v, env.ragCandidates, docIds)),
+    textSearchChunks(spaceId, userId, query, env.ragCandidates, docIds)
   ]);
   return rrf([dense, sparse], env.ragTopK, env.rrfK);
 }

@@ -19,7 +19,7 @@ import pino from 'pino';
 import { recallMemory, saveMemory, type Recalled } from './memory.js';
 import type { ModelUsage } from './cost.js';
 import { hybridSearchChunks, rrf, type ChunkHit } from './retrieval.js';
-import { documentTitles } from './documents.js';
+import { documentTitles, spaceDocuments } from './documents.js';
 import { planResearch } from './planner.js';
 import { checkLater, skipAsPage } from './pagecheck.js';
 
@@ -32,7 +32,7 @@ Your only job is to gather sources. Do not write an answer.
 
 Results for the question may already be in the first message. Which tools you have depends on where this question should be answered from: use what you were given and never assume a tool you cannot see.
 1. With web tools: call fetch_page on the 2 to 4 most relevant results. Only fetched pages can be cited later.
-2. With search_documents: the passages it returns are already citable and there is nothing to fetch. Call it again, worded differently, only if the passages clearly miss the question.
+2. With search_documents: the passages it returns are already citable and there is nothing to fetch. You see each one cut to its first 300 characters and the answer reads it whole, so judge whether a passage is about what the question asks, not whether its opening shows the answer. Search again only if none of them is: they are about something else, or not about the chapter, section or document the question names. Then call it again, worded differently: the topic or the part asked about, never the document's title. If a contents page or overview tells you what that part is about, search for its subject. To search one document only, set document to its title as listed. Each time you search again, the passages you had before are dropped, so if they answer the question, do not search.
 3. Call web_search again only if the results clearly do not cover the question.
 4. If the question is about the present (today, now, current, latest), a result that does not show it is from that time does not cover it: do not fetch it, search again with recency set.
 5. When you have read enough, reply with the single word READY.
@@ -101,12 +101,15 @@ type Research = {
   /** Pre-search results with text that skipAsPage turned away: pages a plain reader cannot quote from. */
   skippedPages: number;
   docLists: ChunkHit[][]; // one ranked list per search_documents call, fused at source-build time
+  /** The one document a planned sub-question is limited to; undefined searches the whole Space. */
+  document?: string;
   seenChunks: Set<string>;
   docSearches: number;
   staleDocSearch: boolean; // the last search_documents returned only chunks already seen
 };
-const newResearch = (query: string, budget: number, sq?: number): Research => ({
+const newResearch = (query: string, budget: number, sq?: number, document?: string): Research => ({
   sq,
+  document,
   query,
   budget,
   calls: 0,
@@ -163,6 +166,37 @@ export function isSmallTalk(query: string): boolean {
     .replace(/\s+/g, ' ')
     .trim();
   return SMALL_TALK.test(q);
+}
+
+/** A numbered part of a document: "chapter 14", "ch. 3", "section 2.1", "page 12", "pp. 40", "appendix B", "part II". */
+const DOC_PART =
+  /\b(?:chapter|ch\.|section|sect\.|part|appendix|page|pages|p\.|pp\.|figure|fig\.|table|listing|exercise)\s*(?:\d+|[ivxlc]+\b|[a-h]\b)/i;
+const TITLE_STOPWORDS = new Set(['and', 'the', 'for', 'with', 'from', 'into']);
+
+/** The words a question would use to name a file: "software-design-python.pdf" → software, design, python. */
+const titleWords = (title: string) =>
+  title
+    .toLowerCase()
+    .replace(/\.(pdf|md|txt)$/, '')
+    .split(/[^a-z0-9]+/)
+    .filter((w) => w.length >= 3 && !TITLE_STOPWORDS.has(w));
+
+/**
+ * A question searched as typed is likely to miss when it names one of the Space's documents or a
+ * numbered part of one. Title words match the pages ABOUT the document (cover, contents, preface),
+ * and "chapter 14" matches the contents page before the chapter. Those questions get a research turn
+ * to search again; every other document question keeps the pre-search, because the research turn,
+ * once given, re-searched 20 of 30 gold questions whose first search was already right (TTFT p95
+ * 6 s against 2.5). A word list, like isTimeSensitive: a miss costs the old behaviour, a false hit
+ * one research turn.
+ */
+export function namesDocumentPart(query: string, titles: string[]): boolean {
+  if (DOC_PART.test(query)) return true;
+  const words = new Set(query.toLowerCase().split(/[^a-z0-9]+/));
+  return titles.some((t) => {
+    const w = titleWords(t);
+    return w.length > 0 && w.every((x) => words.has(x));
+  });
 }
 
 /** The quick pre-search reads up to this many of its results as pages; a page shorter than the floor is a stub. */
@@ -323,14 +357,27 @@ export type RunContext = {
  * the schema is not in the list, and a run with no Space cannot call it because there is
  * nothing to search. A prompt asking the model not to is a suggestion; a missing schema is a
  * gate. Same argument that keeps plan_research away from a quick search (R2).
+ *
+ * titles: the Space's documents, as an enum on search_documents' `document`, so the model picks
+ * one that exists. An empty enum is not a valid schema, so a Space with nothing indexed gets none.
  */
-function toolsFor(ctx: RunContext) {
+function toolsFor(ctx: RunContext, titles: string[]) {
   const docs = ctx.mode !== 'web' && !!ctx.spaceId;
   const web = ctx.mode !== 'docs';
   return TOOL_SCHEMAS.filter((t) => {
     if (t.name === 'search_documents') return docs;
     if (t.name === 'web_search' || t.name === 'fetch_page') return web;
     return true; // memory is available in every mode
+  }).map((t) => {
+    if (t.name !== 'search_documents' || !titles.length) return t;
+    const { properties } = t.input_schema;
+    return {
+      ...t,
+      input_schema: {
+        ...t.input_schema,
+        properties: { ...properties, document: { ...properties.document, enum: titles } }
+      }
+    };
   });
 }
 
@@ -359,6 +406,9 @@ export async function runQuickLoop(
   const deadline = Date.now() + (ctx.depth === 'deep' ? env.maxWallClockSecDeep : env.maxWallClockSec) * 1000;
   let step = 0;
   let terminated = 'done' as Terminated; // `as`, not `: Terminated =`: researchOne assigns 'cap' from inside a closure, which narrowing cannot see
+  // What search_documents may be limited to. Read once, before the plan, which may limit a sub-question to one.
+  const spaceDocs = ctx.mode !== 'web' && ctx.spaceId ? await spaceDocuments(ctx.userId, ctx.spaceId) : [];
+  const docTitleList = [...new Set(spaceDocs.map((d) => d.title))];
 
   /** TOOL_FUNCTIONS from agent_loop.py. Lives inside the loop so it can record what was fetched. */
   async function dispatch(
@@ -445,7 +495,13 @@ export async function runQuickLoop(
         // Unreachable unless toolsFor let it through; a throw here is an honest ok:false, not silence.
         if (!ctx.spaceId) throw new Error('search_documents needs a spaceId on the request');
         const r = own();
-        const hits = await hybridSearchChunks(ctx.spaceId, ctx.userId, String(input.query));
+        // The schema's enum guides the model; it does not bind it. A title that is not in the Space is
+        // an ok:false the model can correct, never a quiet search of everything.
+        const scope = typeof input.document === 'string' && input.document ? input.document : undefined;
+        const docIds = scope ? spaceDocs.filter((d) => d.title === scope).map((d) => d.docId) : undefined;
+        if (docIds && !docIds.length)
+          throw new Error(`no document titled "${scope}" in this Space; listed: ${docTitleList.join(', ')}`);
+        const hits = await hybridSearchChunks(ctx.spaceId, ctx.userId, String(input.query), docIds);
         r.docLists.push(hits);
         r.docSearches++;
         r.staleDocSearch = hits.length > 0 && hits.every((h) => r.seenChunks.has(h.id));
@@ -464,7 +520,10 @@ export async function runQuickLoop(
               })
               .join('\n')
           : '(no matching passages in this Space)';
-        return { output, note: `${hits.length} passages, hybrid${r.staleDocSearch ? ', nothing new' : ''}` };
+        return {
+          output,
+          note: `${hits.length} passages, hybrid${scope ? `, only ${scope}` : ''}${r.staleDocSearch ? ', nothing new' : ''}`
+        };
       }
 
       case 'save_memory': {
@@ -525,13 +584,15 @@ export async function runQuickLoop(
   // and may not come second. Nothing runs in parallel with it, or its trace could beat `plan`
   // onto the wire. A failed plan ends the run: the server never quietly downgrades deep to quick.
   let plan: PlanEvent | undefined;
+  let planDocuments: (string | undefined)[] = []; // by sub-question, in plan order
   if (ctx.depth === 'deep') {
     step += 1;
     const t0 = Date.now();
     try {
-      const r = await planResearch(query, history.length ? historyText(history) : '');
+      const r = await planResearch(query, history.length ? historyText(history) : '', docTitleList);
       addUsage(r.model, r.usage);
       plan = r.plan;
+      planDocuments = r.documents;
     } catch (e) {
       const error = e instanceof Error ? e.message : String(e);
       const ms = Date.now() - t0;
@@ -630,7 +691,12 @@ export async function runQuickLoop(
         ? callTool('web_search', { query: r.query }, `${tag}, the question as typed`, r, { withPages })
         : undefined,
       useDocs
-        ? callTool('search_documents', { query: r.query }, `${tag}, space ${ctx.spaceId}`, r)
+        ? callTool(
+            'search_documents',
+            { query: r.query, ...(r.document ? { document: r.document } : {}) },
+            `${tag}, space ${ctx.spaceId}`,
+            r
+          )
         : undefined,
       recall,
       remembers ? rememberIfStated(r.query) : undefined
@@ -640,7 +706,9 @@ export async function runQuickLoop(
       r.sq ? `This is one part of a larger question: ${query}` : '',
       `Question: ${r.query}`,
       web ? `Web results for the question as typed:\n${web.output}` : '',
-      docs ? `Passages from the user's own documents:\n${docs.output}` : '',
+      docs
+        ? `Passages from the user's own documents${r.document ? ` (only ${r.document})` : ''}:\n${docs.output}`
+        : '',
       inThread
         ? 'If the question only makes sense with the earlier turns and these results miss its topic, search again with the full topic spelled out. Otherwise work with these results.'
         : ''
@@ -651,15 +719,25 @@ export async function runQuickLoop(
     if (known) opening = `${known}\n\n${opening}`;
     const messages: Anthropic.MessageParam[] = [{ role: 'user', content: opening }];
     // A sub-question never saves memory: four of them would save the same fact four times.
-    const tools = r.sq || remembers ? toolsFor(ctx).filter((t) => t.name !== 'save_memory') : toolsFor(ctx);
+    const tools =
+      r.sq || remembers
+        ? toolsFor(ctx, docTitleList).filter((t) => t.name !== 'save_memory')
+        : toolsFor(ctx, docTitleList);
 
     const docsFull = () => !useWeb && r.docLists.flat().length >= env.ragTopK;
     // The same "enough to answer from" test the research loop ends on, applied before its first turn,
     // plus one case: one page read and the rest of the results skipped as browser-only. A research
     // turn there re-searches and fetches the skipped pages anyway (the third bench: the Tavily extract
     // question ran 7 tool calls, 14.7 s to the first token, and its fetch of community.tavily.com failed).
+    // Except a question that names a document or a part of one (namesDocumentPart). Hybrid search always
+    // returns ragTopK passages, so a full set is not a relevant one: "the main takeaways of chapter 14
+    // of <book title>" was searched as typed, the title words pulled the front matter, and the answer
+    // said chapter 14 was not there. The research turn is the only step that can search again.
+    const targetsPart = useDocs && namesDocumentPart(r.query, docTitleList);
     const skipResearch =
-      !followUp && (r.pages.length >= 2 || (r.pages.length === 1 && r.skippedPages > 0) || docsFull());
+      !followUp &&
+      !targetsPart &&
+      (r.pages.length >= 2 || (r.pages.length === 1 && r.skippedPages > 0) || docsFull());
     if (skipResearch)
       log.debug(
         { phase: 'research', sq: r.sq, skipped: true, pages: r.pages.length, skippedPages: r.skippedPages },
@@ -702,6 +780,7 @@ export async function runQuickLoop(
       const seen = new Map<string, number>();
       const remaining = r.budget - r.calls;
       let admitted = 0; // counted synchronously in .map order, before any await, exactly like `seen`
+      const listsBefore = r.docLists.length;
       const results: Anthropic.ToolResultBlockParam[] = await Promise.all(
         toolBlocks.map(async (block) => {
           // A page the page check knows a plain reader cannot quote from is not fetched: the third
@@ -741,10 +820,17 @@ export async function runQuickLoop(
       );
 
       messages.push({ role: 'user', content: results });
-      // Enough to answer from: two fetched pages; or, with no web half, a full set of passages; or the
-      // document side is exhausted — a search that found nothing new, or the search budget spent.
+      // The model searched the documents again, so what it had missed (rule 2): only this turn's lists
+      // are kept. Fused with the earlier ones, the table of contents it searched past to find chapter 14
+      // took half of the top five back from the chapter's own pages.
+      const searchedDocs = r.docLists.length > listsBefore;
+      if (searchedDocs) r.docLists = r.docLists.slice(listsBefore);
+      // Enough to answer from: two fetched pages; or, with no web half, a full set of passages the model
+      // has read; or the document side is exhausted — a search that found nothing new, or the search
+      // budget spent. A search the model just made gets one more turn to be read: the first one often
+      // only finds where the answer is (a contents page naming chapter 14's patterns), not the answer.
       const docsDone = r.staleDocSearch || r.docSearches >= env.maxDocSearches; // CHANGED: r.
-      if (r.pages.length >= 2 || docsFull() || docsDone) break; // CHANGED: r.pages
+      if (r.pages.length >= 2 || (docsFull() && !searchedDocs) || docsDone) break; // CHANGED: r.pages
     }
   }
 
@@ -755,7 +841,7 @@ export async function runQuickLoop(
   const researches = smallTalk
     ? []
     : subQs.length
-      ? subQs.map((s) => newResearch(s.question, share, s.i))
+      ? subQs.map((s, idx) => newResearch(s.question, share, s.i, planDocuments[idx]))
       : [newResearch(query, share)];
   if (smallTalk) await recall; // no research awaits it here, and memoryBlock below reads what it found
 

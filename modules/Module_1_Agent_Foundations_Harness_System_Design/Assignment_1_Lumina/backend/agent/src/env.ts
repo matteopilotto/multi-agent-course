@@ -53,6 +53,9 @@ export const env = {
   ragTopK: num(process.env.RAG_TOP_K, 5),
   ragCandidates: num(process.env.RAG_CANDIDATES, 20),
   rrfK: num(process.env.RRF_K, 60),
+  // A search limited to some documents filters after $vectorSearch (docId is not an index filter
+  // field), so the vector branch reads this many of the Space's nearest chunks before filtering.
+  ragDocFilterDepth: num(process.env.RAG_DOC_FILTER_DEPTH, 400),
   // A docs-only research phase has no "two pages fetched" exit, so the harness ends it: after
   // this many search_documents calls (the pre-search counts), or sooner if one finds nothing new.
   maxDocSearches: num(process.env.MAX_DOC_SEARCHES, 3),
