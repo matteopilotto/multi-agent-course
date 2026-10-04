@@ -35,9 +35,13 @@ export function Composer({
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         onKeyDown={(e) => {
-          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) submit();
+          // Enter sends, Shift + Enter is a new line; an IME composing text (Japanese, Chinese)
+          // uses Enter to pick a candidate, so that Enter is left alone.
+          if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing) return;
+          e.preventDefault();
+          submit();
         }}
-        placeholder="Ask anything. Cmd/Ctrl + Enter to send."
+        placeholder="Ask anything. Enter to send, Shift + Enter for a new line."
         aria-label="Your question"
       />
       <div className="row">
