@@ -30,7 +30,11 @@ Welcome to the official course repository for the **FDE Agent Engineering Bootca
 
 Six modules teach the concepts; four projects make you ship them.
 
-> **Looking for a previous cohort?** The prior version of this course is preserved on the [`2026-02`](https://github.com/hamzafarooq/multi-agent-course/tree/2026-02) branch (and `2026-01` before it).
+> **Branches are cohort archives.** `main` is always the course as it is being taught now. Every
+> past cohort is frozen on its own branch and never moves again: [`2026-02`](https://github.com/hamzafarooq/multi-agent-course/tree/2026-02),
+> and `2026-01` before it. [`2026-03`](https://github.com/hamzafarooq/multi-agent-course/tree/2026-03)
+> is an early snapshot of the current cohort, kept for reference; follow `main` for the live version.
+> Clone `main` unless you are deliberately looking at history.
 
 ## Why merge Agent Engineering and FDE?
 
@@ -62,6 +66,9 @@ Modern AI builders need more than model skills.
 
 ## Quick Links
 
+> 🧭 **New here? Read [`START_HERE.md`](START_HERE.md) first.** Ten minutes, once — how an assignment is structured, which files are written for you and which for your
+> coding agent, what's yours to decide, and how to drive a build with Claude Code.
+
 **Course modules** (in teaching order):
 
 1. [Week 1: Agent Foundations, Agent Harness & System Design](#week-1-agent-foundations-agent-harness--system-design)
@@ -72,7 +79,7 @@ Modern AI builders need more than model skills.
 6. [Week 6: Leading AI Systems Across Teams](#week-6-leading-ai-systems-across-teams)
 7. [Week 7: Demo Day, Production-Ready AI Systems](#week-7-demo-day-production-ready-ai-systems)
 
-**Also on this page:** [The four projects](#the-four-projects) · [How to use this repo](#how-to-use-this-repo) · [What you'll build](#what-youll-build) · [Sprint Zero](#full-stack-projects) · [Starter Projects](#starter-projects) · [The quality bar](#the-quality-bar-how-work-is-judged-and-how-to-give-feedback) · [How to submit](SUBMISSION.md)
+**Also on this page:** [The four projects](#the-four-projects) · [How to use this repo](#how-to-use-this-repo) · [What you'll build](#what-youll-build) · [Sprint Zero](#full-stack-projects) · [Starter Projects](#starter-projects) · [The quality bar](#the-quality-bar-how-work-is-judged-and-how-to-give-feedback) · [Start here](START_HERE.md) · [How to submit](SUBMISSION.md)
 
 ### 🗺️ Course at a glance
 
@@ -340,6 +347,8 @@ A Claude Code kit that runs a full sub-agent product team on your laptop: scopin
 - ⏱️ **~10–20 min** end-to-end for an MVP
 
 [![Open Sprint Zero](https://img.shields.io/badge/▶%20Open-Sprint%20Zero-6E40C9?style=for-the-badge)](Full_Stack_Projects/Sprint_Zero)
+
+Want to see a finished run before you start one? [`examples/ghost-lite`](Full_Stack_Projects/Sprint_Zero/examples/ghost-lite/) is a real Sprint Zero run against Ghost, with an added "Ask me" box that answers questions from the seeded blog posts, committed exactly as the agents produced it.
 
 Built by [Yousuf Alvi](https://github.com/yousuf-alvi) and [Hamza Farooq](https://www.linkedin.com/in/hamzafarooq/).
 

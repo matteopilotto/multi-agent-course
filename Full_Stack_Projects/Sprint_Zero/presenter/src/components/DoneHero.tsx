@@ -11,9 +11,10 @@ interface DoneHeroProps {
   appUrl: string;
   credentials?: Credentials | null;
   projectName?: string | null;
+  demo?: boolean;
 }
 
-export function DoneHero({ appUrl, credentials, projectName }: DoneHeroProps) {
+export function DoneHero({ appUrl, credentials, projectName, demo }: DoneHeroProps) {
   return (
     <motion.div
       initial={{ opacity: 0, scale: 0.98 }}
@@ -21,29 +22,38 @@ export function DoneHero({ appUrl, credentials, projectName }: DoneHeroProps) {
       transition={{ duration: 0.4, ease: [0.2, 0.8, 0.2, 1] }}
       className="h-full flex items-center"
     >
-      <Card
-        className="w-full p-10 border-[rgba(91,91,214,0.25)] bg-gradient-to-br from-[rgba(91,91,214,0.06)] via-surface to-surface-2"
-        elevated
-      >
+      <Card className="w-full p-10" elevated>
         <div className="flex flex-col items-start">
           <Badge tone="accent" className="mb-5">
             <PartyPopper className="w-3 h-3" />
             Ready to demo
           </Badge>
-          <h2 className="text-[44px] leading-[1.1] font-semibold tracking-[-0.02em] text-fg">
+          <h2 className="text-[48px] leading-[1.05] font-semibold tracking-[-0.04em] text-fg">
             Your product is live.
           </h2>
           <p className="mt-4 text-[15.5px] leading-relaxed text-fg-muted max-w-[560px]">
-            Sprint Zero finished the pipeline. Backend, frontend, and QA all passed.
-            {projectName ? ` Project: ${projectName}.` : null} Open the app and walk through the
-            core loop.
+            Both servers are up, QA passed, and the demo user below is already seeded
+            {projectName ? ` for ${projectName}` : ""}. Open the app and walk the core loop.
           </p>
 
           <UrlRow url={appUrl} />
 
           {credentials && <CredentialsBlock credentials={credentials} />}
 
-          <div className="mt-9 flex items-center gap-3">
+          {demo && (
+            <div className="mt-5 w-full max-w-[560px]">
+              <div className="text-[11px] font-mono text-fg-subtle uppercase tracking-widest mb-2">
+                Start the app first
+              </div>
+              <pre className="rounded-md border border-border bg-surface-2 p-4 text-[12.5px] font-mono leading-relaxed text-fg overflow-x-auto">{`cd examples/${projectName ?? "ghost-lite"}/server && npm install && node index.js
+cd examples/${projectName ?? "ghost-lite"}/client && npm install && npm run dev`}</pre>
+              <p className="mt-2 text-[12.5px] text-fg-subtle">
+                The sample is a recording. The URL above only answers once those two commands are running.
+              </p>
+            </div>
+          )}
+
+          <div className="mt-9 flex items-center gap-3 flex-wrap">
             <Button
               size="lg"
               onClick={() => window.open(appUrl, "_blank", "noopener")}
@@ -52,8 +62,18 @@ export function DoneHero({ appUrl, credentials, projectName }: DoneHeroProps) {
               Open the app
               <ExternalLink className="w-4 h-4" />
             </Button>
+            {demo && (
+              <Button
+                size="lg"
+                variant="secondary"
+                onClick={() => window.open("/sample/build-record.html", "_blank", "noopener")}
+              >
+                Read the build record
+                <ExternalLink className="w-4 h-4" />
+              </Button>
+            )}
             <p className="text-[12.5px] text-fg-subtle">
-              Opens in a new tab. Log in with the credentials above.
+              {demo ? "The record says what got built and how QA tested it." : "Opens in a new tab. Sign in with the demo login above."}
             </p>
           </div>
         </div>
@@ -65,7 +85,7 @@ export function DoneHero({ appUrl, credentials, projectName }: DoneHeroProps) {
 function UrlRow({ url }: { url: string }) {
   return (
     <div className="mt-8 w-full max-w-[560px]">
-      <div className="flex items-center gap-2 rounded-lg border border-border bg-surface px-4 h-12">
+      <div className="flex items-center gap-2 rounded-md border border-border bg-surface px-4 h-12">
         <div className="flex items-center gap-2 text-[12px] text-fg-subtle">
           <span className="inline-flex items-center gap-1.5">
             <span className="w-1.5 h-1.5 rounded-full bg-success" />
@@ -86,7 +106,7 @@ function CredentialsBlock({ credentials }: { credentials: Credentials }) {
       <div className="text-[11px] font-mono text-fg-subtle uppercase tracking-widest mb-2">
         Demo login
       </div>
-      <Card className="p-4 bg-surface-2/60 border-border/60">
+      <Card className="p-4 bg-surface-2">
         <CredRow label="email" value={credentials.email} />
         <div className="h-px bg-border my-3" />
         <CredRow label="password" value={credentials.password} />

@@ -1,17 +1,20 @@
 import { useEffect, useState } from "react";
 import { motion } from "motion/react";
-import { ArrowRight, ArrowLeft, CheckCircle2, Globe, Github, Loader2 } from "lucide-react";
+import { ArrowRight, ArrowLeft, Check, Globe, Github, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Input, Textarea, Label, FieldHint } from "@/components/ui/input";
+import { Input, Textarea, Label, FieldHint, Segmented } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/cn";
 import { submitScope } from "@/lib/status";
-import type { ScopeLevel, Status } from "@/lib/types";
+import type { DataLayer, ProjectType, ScopeLevel, ScopeSubmission, StackProfile, Status } from "@/lib/types";
 
 interface ScopeProps {
   onSubmitted: () => void;
+  onBack: () => void;
   status: Status;
+  /** Demo replay: open the form prefilled with these real values; Start begins the replay without writing to disk. */
+  autoplay?: Partial<ScopeSubmission> | null;
 }
 
 const LEVEL_OPTIONS: {
@@ -25,28 +28,48 @@ const LEVEL_OPTIONS: {
     value: "clickable",
     title: "Clickable",
     tagline: "Pitch-ready walkthrough",
-    body: "Mock backend, fake data, no auth. Fastest path to something you can show.",
+    body: "Fake data, no login, nothing persists. Fastest path to something you can click through.",
   },
   {
     value: "MVP",
     title: "MVP",
-    tagline: "The idea actually works",
-    body: "Real Supabase, real auth, one core loop end-to-end.",
+    tagline: "The core loop works for real",
+    body: "Real signup and login, real rows in a database, one flow working end to end.",
     recommended: true,
   },
   {
     value: "Prod",
     title: "Prod",
-    tagline: "Ready for real users",
-    body: "MVP plus error states, validation, loading, and a Playwright error-path test.",
+    tagline: "Ready for a handful of real users",
+    body: "MVP plus form validation, loading states, error boundaries, and a browser test that submits bad input.",
   },
 ];
 
-export function Scope({ onSubmitted, status }: ScopeProps) {
+const PROJECT_TYPES: { value: ProjectType; label: string; hint: string }[] = [
+  { value: "web-app", label: "web-app", hint: "UI + API" },
+  { value: "api-service", label: "api-service", hint: "API only" },
+  { value: "cli-tool", label: "cli-tool", hint: "command line" },
+];
+
+const STACKS: { value: StackProfile; label: string; hint: string }[] = [
+  { value: "node-react", label: "node-react", hint: "Express + Vite" },
+  { value: "nextjs", label: "nextjs", hint: "one app" },
+  { value: "python-react", label: "python-react", hint: "FastAPI + Vite" },
+];
+
+const DATA_LAYERS: { value: DataLayer; label: string; hint: string }[] = [
+  { value: "local", label: "local", hint: "SQLite, no keys" },
+  { value: "supabase", label: "supabase", hint: "needs a .env" },
+];
+
+export function Scope({ onSubmitted, onBack, status, autoplay }: ScopeProps) {
   const [projectName, setProjectName] = useState("");
   const [companyUrl, setCompanyUrl] = useState("");
   const [repoUrl, setRepoUrl] = useState("");
   const [level, setLevel] = useState<ScopeLevel>("MVP");
+  const [projectType, setProjectType] = useState<ProjectType>("web-app");
+  const [stack, setStack] = useState<StackProfile>("node-react");
+  const [dataLayer, setDataLayer] = useState<DataLayer>("local");
   const [coreLoop, setCoreLoop] = useState("");
   const [excludes, setExcludes] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -54,11 +77,27 @@ export function Scope({ onSubmitted, status }: ScopeProps) {
 
   // Transition once the orchestrator has picked up scope.md.
   useEffect(() => {
+    if (autoplay) return;
     if (status.phase !== "idle" && status.phase !== "waiting-for-scope") {
       const t = setTimeout(onSubmitted, 300);
       return () => clearTimeout(t);
     }
-  }, [status.phase, onSubmitted]);
+  }, [status.phase, onSubmitted, autoplay]);
+
+  // Demo replay: open the form already filled with the real scope. The presenter presses Start.
+  useEffect(() => {
+    if (!autoplay) return;
+    setProjectName(autoplay.projectName ?? "");
+    setCompanyUrl(autoplay.companyUrl ?? "");
+    setRepoUrl(autoplay.repoUrl ?? "");
+    if (autoplay.level) setLevel(autoplay.level);
+    if (autoplay.projectType) setProjectType(autoplay.projectType);
+    if (autoplay.stack) setStack(autoplay.stack);
+    if (autoplay.dataLayer) setDataLayer(autoplay.dataLayer);
+    setCoreLoop(autoplay.coreLoop ?? "");
+    setExcludes(autoplay.excludes ?? "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoplay]);
 
   const canSubmit = companyUrl.trim() && coreLoop.trim() && !submitting;
 
@@ -67,11 +106,19 @@ export function Scope({ onSubmitted, status }: ScopeProps) {
     if (!canSubmit) return;
     setSubmitting(true);
     setError(null);
+    if (autoplay) {
+      // A recording never writes docs/scope.md.
+      setTimeout(onSubmitted, 600);
+      return;
+    }
     const result = await submitScope({
       projectName,
       companyUrl,
       repoUrl,
       level,
+      projectType,
+      stack,
+      dataLayer,
       coreLoop,
       excludes,
     });
@@ -85,26 +132,22 @@ export function Scope({ onSubmitted, status }: ScopeProps) {
   return (
     <div className="pt-16 pb-8">
       <div className="max-w-[820px] mx-auto">
-        {/* ------------------------ header ------------------------ */}
         <motion.div
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.3 }}
         >
-          <Badge tone="accent" className="mb-5">
-            Step 1 of 1
-          </Badge>
-          <h1 className="text-[44px] leading-[1.1] font-semibold tracking-[-0.02em] text-fg">
+          <Badge className="mb-5">Scoping</Badge>
+          <h1 className="text-[44px] leading-[1.1] font-semibold tracking-[-0.03em] text-fg">
             Tell Sprint Zero what you want to build.
           </h1>
           <p className="mt-4 text-[16px] leading-relaxed text-fg-muted max-w-[620px]">
-            Sprint Zero normally asks these questions in the terminal. The answers go
-            straight into <code className="font-mono text-[13px] text-fg">docs/scope.md</code>,
-            which every downstream agent reads.
+            These are the same questions the terminal would ask. Your answers are written to{" "}
+            <code className="font-mono text-[13px] text-fg">docs/scope.md</code>, and every agent
+            in the run reads that file before it does anything else.
           </p>
         </motion.div>
 
-        {/* ------------------------ form ------------------------ */}
         <motion.form
           onSubmit={handleSubmit}
           initial={{ opacity: 0, y: 12 }}
@@ -112,7 +155,6 @@ export function Scope({ onSubmitted, status }: ScopeProps) {
           transition={{ delay: 0.06, duration: 0.3 }}
           className="mt-12 space-y-10"
         >
-          {/* ---- identity ---- */}
           <section className="space-y-5">
             <SectionLabel num="01" title="Identify the run" />
 
@@ -120,7 +162,7 @@ export function Scope({ onSubmitted, status }: ScopeProps) {
               <Label htmlFor="projectName">Project name</Label>
               <Input
                 id="projectName"
-                placeholder="mini-crm"
+                placeholder="mini-twenty"
                 value={projectName}
                 onChange={(e) => setProjectName(e.target.value)}
               />
@@ -141,7 +183,7 @@ export function Scope({ onSubmitted, status }: ScopeProps) {
                 />
               </div>
               <FieldHint>
-                The product Sprint Zero will study to build something similar. Required.
+                The product Sprint Zero studies and then rebuilds at the level you pick below. Required.
               </FieldHint>
             </Field>
 
@@ -158,13 +200,12 @@ export function Scope({ onSubmitted, status }: ScopeProps) {
                 />
               </div>
               <FieldHint>
-                Optional. Providing a repo lets the researcher read the source alongside the
-                product site.
+                Optional. With a repo, the researcher reads the README and folder structure
+                alongside the marketing site, which makes the API contract far less guessy.
               </FieldHint>
             </Field>
           </section>
 
-          {/* ---- level ---- */}
           <section className="space-y-5">
             <SectionLabel num="02" title="Pick a build level" />
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -176,11 +217,11 @@ export function Scope({ onSubmitted, status }: ScopeProps) {
                     type="button"
                     onClick={() => setLevel(opt.value)}
                     className={cn(
-                      "text-left p-5 rounded-xl border transition-all duration-150",
-                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50",
+                      "text-left p-5 rounded-lg border transition-colors duration-150",
+                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-fg/20",
                       selected
-                        ? "border-[rgba(91,91,214,0.4)] bg-gradient-to-b from-[rgba(91,91,214,0.07)] to-transparent shadow-[var(--shadow-elev-2)]"
-                        : "border-border bg-surface hover:border-border-strong hover:bg-surface-2"
+                        ? "border-fg bg-surface"
+                        : "border-border bg-surface hover:border-border-strong"
                     )}
                   >
                     <div className="flex items-center justify-between">
@@ -188,15 +229,17 @@ export function Scope({ onSubmitted, status }: ScopeProps) {
                         {opt.value}
                       </div>
                       {selected ? (
-                        <CheckCircle2 className="w-4 h-4 text-accent" strokeWidth={2} />
+                        <span className="h-4 w-4 rounded-full bg-fg text-bg flex items-center justify-center">
+                          <Check className="w-2.5 h-2.5" strokeWidth={3} />
+                        </span>
                       ) : opt.recommended ? (
-                        <Badge tone="accent">Default</Badge>
+                        <Badge>Default</Badge>
                       ) : null}
                     </div>
                     <div className="mt-3 text-[17px] font-semibold tracking-tight text-fg">
                       {opt.title}
                     </div>
-                    <div className="mt-0.5 text-[12.5px] text-accent font-medium">{opt.tagline}</div>
+                    <div className="mt-0.5 text-[12.5px] text-fg-muted font-medium">{opt.tagline}</div>
                     <div className="mt-3 text-[13px] leading-relaxed text-fg-muted">{opt.body}</div>
                   </button>
                 );
@@ -204,29 +247,62 @@ export function Scope({ onSubmitted, status }: ScopeProps) {
             </div>
           </section>
 
-          {/* ---- core loop ---- */}
           <section className="space-y-5">
-            <SectionLabel num="03" title="Name the core loop" />
+            <SectionLabel num="03" title="Choose the build configuration" />
+            <Field>
+              <Label>Project type</Label>
+              <Segmented value={projectType} onChange={setProjectType} options={PROJECT_TYPES} ariaLabel="Project type" />
+              <FieldHint>
+                {projectType === "web-app"
+                  ? "A UI plus an API. Both engineers are spawned and QA drives a real browser."
+                  : projectType === "api-service"
+                    ? "Backend only. No frontend, no browser tests. QA checks the API directly."
+                    : "A command-line program. No server. QA runs the CLI and asserts on output."}
+              </FieldHint>
+            </Field>
+            <Field>
+              <Label>Stack profile</Label>
+              <Segmented value={stack} onChange={setStack} options={STACKS} ariaLabel="Stack profile" />
+              <FieldHint>
+                {stack === "node-react"
+                  ? "Express on 3001, React + Vite on 5173. The default and the best-trodden path."
+                  : stack === "nextjs"
+                    ? "One Next.js app on 3000 serving both pages and route handlers."
+                    : "FastAPI on 8000, React + Vite on 5173. Python dependencies in a venv."}
+              </FieldHint>
+            </Field>
+            <Field>
+              <Label>Data layer</Label>
+              <Segmented value={dataLayer} onChange={setDataLayer} options={DATA_LAYERS} ariaLabel="Data layer" />
+              <FieldHint>
+                {dataLayer === "local"
+                  ? "SQLite file plus a self-issued JWT. Runs straight after clone with no account or keys."
+                  : "Hosted Postgres and Supabase Auth. Needs a free Supabase project and four keys in a .env."}
+              </FieldHint>
+            </Field>
+          </section>
+
+          <section className="space-y-5">
+            <SectionLabel num="04" title="Name the core loop" />
             <Field>
               <Label htmlFor="coreLoop">The one user flow that must work</Label>
               <Textarea
                 id="coreLoop"
-                placeholder="User creates a contact (name, email, company), creates a deal linked to that contact, and moves the deal across pipeline stages (Lead → Qualified → Proposal → Closed Won / Closed Lost)."
+                placeholder="User creates a contact (name, email, company), creates a deal linked to that contact, and moves the deal across pipeline stages (Lead, Qualified, Proposal, Closed Won or Closed Lost)."
                 value={coreLoop}
                 onChange={(e) => setCoreLoop(e.target.value)}
                 required
                 className="min-h-[120px]"
               />
               <FieldHint>
-                If only one thing works end-to-end, what is it? Be specific — the agents follow
-                this literally.
+                If only one thing works end to end, what is it? Name the screens and the records.
+                The agents build exactly this and not much else.
               </FieldHint>
             </Field>
           </section>
 
-          {/* ---- excludes ---- */}
           <section className="space-y-5">
-            <SectionLabel num="04" title="Name what to leave out" />
+            <SectionLabel num="05" title="Name what to leave out" />
             <Field>
               <Label htmlFor="excludes">Anything to exclude</Label>
               <Textarea
@@ -239,16 +315,16 @@ export function Scope({ onSubmitted, status }: ScopeProps) {
                 className="min-h-[120px]"
               />
               <FieldHint>
-                One per line. The long and specific this list is, the tighter the build.
+                One per line. Anything listed here is a feature the agents will not attempt,
+                which is how you stop an MVP from growing a settings page.
               </FieldHint>
             </Field>
           </section>
 
-          {/* ---- submit ---- */}
           <section className="pt-2">
-            <Card className="p-5 flex items-center justify-between bg-surface-2/60">
+            <Card className="p-4 flex items-center justify-between bg-surface-2">
               <div className="flex items-center gap-3">
-                <Button type="button" variant="ghost" size="md" onClick={() => history.back()}>
+                <Button type="button" variant="ghost" size="md" onClick={onBack}>
                   <ArrowLeft className="w-4 h-4" />
                   Back
                 </Button>
@@ -260,7 +336,7 @@ export function Scope({ onSubmitted, status }: ScopeProps) {
                 {submitting ? (
                   <>
                     <Loader2 className="w-4 h-4 animate-spin" />
-                    Waiting for Sprint Zero…
+                    Waiting for Sprint Zero
                   </>
                 ) : (
                   <>
@@ -279,7 +355,7 @@ export function Scope({ onSubmitted, status }: ScopeProps) {
 
 function SectionLabel({ num, title }: { num: string; title: string }) {
   return (
-    <div className="flex items-baseline gap-3 pb-2 border-b border-border/60">
+    <div className="flex items-baseline gap-3 pb-2 border-b border-border">
       <span className="font-mono text-[11px] text-fg-subtle tracking-widest">{num}</span>
       <h2 className="text-[17px] font-semibold tracking-tight text-fg">{title}</h2>
     </div>

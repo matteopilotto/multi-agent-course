@@ -27,7 +27,7 @@ Built by **[Yousuf Alvi](https://github.com/yousuf-alvi)** · **[Hamza Farooq](h
                                                                        └─ 🎨 frontend ┘
 ```
 
-Sprint Zero is a Claude Code kit that gives a PM or founder a full sub-agent product team on their laptop. You bring the idea and a reference URL. Sprint Zero handles scoping, research, specs, parallel engineering, and QA — and hands back a running product. The default build runs **straight after clone with no account, no keys, and no `.env`.**
+Sprint Zero is a Claude Code kit that gives a developer, founder, or PM a full sub-agent product team on their laptop. You bring the idea and a reference URL. Sprint Zero handles scoping, research, specs, parallel engineering, and QA — and hands back a running product. The default build runs **straight after clone with no account, no keys, and no `.env`.**
 
 ---
 
@@ -345,7 +345,8 @@ sprint-zero/
 │       ├── frontend-engineer.md
 │       └── qa-engineer.md
 ├── docs/                            ← generated specs (gitignored; filled at runtime)
-├── examples/                        ← worked examples (Mini Twenty lands here in Phase 5)
+├── examples/
+│   └── ghost-lite/                  ← the worked example: a real run against ghost.org, committed as-is
 ├── server/ + client/  (or app/, or cli/)  ← the build, per stack profile (gitignored; created at runtime)
 ├── .env.example                     ← only for the supabase data layer (local needs none)
 ├── .gitignore
@@ -410,7 +411,7 @@ For walking PMs or non-developers through Sprint Zero, run it with `--present`:
 A polished local UI boots at `http://localhost:4000` and opens in the browser. Use it for three phases of the demo:
 
 1. **About** — explains scope levels, the agent topology, and the spec pipeline. Stay here while you talk through the concept.
-2. **Start a run** — a form replaces the terminal scoping conversation. Submitting it writes `docs/scope.md`.
+2. **Start a run** — a form replaces the terminal scoping conversation: level, project type, stack, data layer, core loop, excludes. Submitting it writes `docs/scope.md` in the same format `/sprint-zero-scope` produces.
 3. **Live** — a vertical pipeline timeline updates in real time as each spec doc lands. Click any completed step to view its rendered markdown. The build phase shows backend and frontend as side-by-side cards. When the run finishes, the screen reveals the running app's URL with a copyable demo login.
 
 The presenter is a permanent committed part of the kit, not a one-off. The terminal narration is unchanged, so you can also screen-share the Claude Code window alongside the UI.
@@ -423,6 +424,25 @@ cd presenter && npm install && npm run build && npm start
 
 ---
 
+## Worked example: ghost-lite
+
+[`examples/ghost-lite/`](examples/ghost-lite/) is one complete Sprint Zero run, copied from the pipeline's output without edits: the six spec docs, the Express + SQLite backend, the React client, and QA's integration test. The reference was [Ghost](https://ghost.org), the open-source publishing platform, at MVP / web-app / node-react / local, plus one feature Ghost does not have: an "Ask me" box that answers reader questions from the site's own posts with citations (SQLite full-text search; Claude writes the answer only when `ANTHROPIC_API_KEY` is set, otherwise the box returns the matching passages). The seeded site is the Traversaal.ai blog, ten real articles, so Ask me has something worth answering from on first launch.
+
+Run it:
+
+```
+cd examples/ghost-lite/server && npm install && node index.js      # :3001, seeds on start
+cd examples/ghost-lite/client && npm install && npm run dev        # :5173
+```
+
+Demo login `demo@traversaal.ai` / `inkwell-demo`. Public site at `http://localhost:5173/s/traversaal-ai`. See [`examples/ghost-lite/README.md`](examples/ghost-lite/README.md) for what QA verified and how.
+
+[`presenter/sample/build-record.html`](presenter/sample/build-record.html) is the write-up for the class: what got built and how QA tested it, with screenshots. The presenter serves it at `/sample/build-record.html` and links it from the demo's finish screen.
+
+The same run is committed under `presenter/sample/` so the presenter can replay it. **Run demo** in the presenter's top bar (or `http://localhost:4000/#demo`) plays the run back in about a minute: the scoping form opens prefilled with the real scope, you press Start, and the pipeline advances step by step with each real doc appearing as it landed, the build cards and QA rows go green, and it ends on the finished product with a link to the build record. Only the clock is compressed; nothing is invented. **Skip to end**, **Replay**, and **Exit demo** sit in the sample bar. With no run on disk the presenter shows the finished sample automatically; `SPRINT_ZERO_DEMO=0` turns that fallback off (the button still works).
+
+---
+
 ## 🩺 Troubleshooting
 
 **The page shows "Failed to load data" (or similar).** Tables aren't created yet. Re-run the seed command for your build (e.g. `cd server && node seed.js`).
@@ -431,7 +451,7 @@ cd presenter && npm install && npm run build && npm start
 
 **Every API call returns 401 (supabase only).** New Supabase projects issue ES256 tokens, not RS256. `middleware/auth.js` must accept both, and the JWKS URI must be `{SUPABASE_URL}/auth/v1/.well-known/jwks.json` (not `/auth/v1/jwks`). On `local`, a 401 usually means the stored JWT is missing or the dev secret changed — log in again.
 
-**QA didn't run the browser tests.** Either the Playwright MCP server isn't registered under the name `playwright` (run `claude mcp list`, register it, re-spawn `qa-engineer`), or the project type is `api-service`/`cli-tool`, which have no browser tests by design.
+**QA didn't run the browser tests.** Either no browser MCP is registered (`claude mcp list` should show `playwright` or `brave-devtools`; register one and re-spawn `qa-engineer`, or let QA fall back to its Playwright script), or the project type is `api-service`/`cli-tool`, which have no browser tests by design.
 
 **Seed says "relation/table does not exist".** On `local`, just re-run the seed — it creates the SQLite schema. On `supabase`, `DATABASE_URL` is wrong: get it from Settings → Database → Connection string → URI, Session mode, port 5432 (`postgresql://postgres.[ref]:[password]@aws-0-[region].pooler.supabase.com:5432/postgres`).
 
@@ -457,7 +477,7 @@ Deliberate cuts, tracked in [plan.md](plan.md) as v2 candidates:
 - Phase 2 — Scoping and discovery layer — complete
 - Phase 3 — Build layer — complete
 - Phase 4 — Kickoff orchestrator — complete
-- Phase 5 — Mini Twenty worked example — not started
+- Phase 5 — Worked example (ghost-lite, a real run against ghost.org) — complete
 - Phase 6 — Polish for launch — not started
 
 See [plan.md](plan.md) for the full roadmap.

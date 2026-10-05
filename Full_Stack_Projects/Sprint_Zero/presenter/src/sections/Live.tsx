@@ -13,9 +13,10 @@ import { Activity, Loader2 } from "lucide-react";
 
 interface LiveProps {
   status: Status;
+  demo?: boolean;
 }
 
-export function Live({ status }: LiveProps) {
+export function Live({ status, demo }: LiveProps) {
   const failed = status.phase === "failed";
   const isDone = status.phase === "done";
 
@@ -65,7 +66,7 @@ export function Live({ status }: LiveProps) {
       <div className="mt-8 grid grid-cols-1 lg:grid-cols-[340px_1fr] gap-6">
         {/* ---------- left: timeline ---------- */}
         <Card className="p-4 h-fit lg:sticky lg:top-20">
-          <div className="px-2 pt-1 pb-3 border-b border-border/60 flex items-center justify-between">
+          <div className="px-2 pt-1 pb-3 border-b border-border flex items-center justify-between">
             <div className="text-[11px] font-mono text-fg-subtle uppercase tracking-widest">
               Pipeline
             </div>
@@ -80,7 +81,7 @@ export function Live({ status }: LiveProps) {
               phase={status.phase}
               docs={status.docs}
               selectedKey={activeKey}
-              onSelect={(p) => setPinnedKey(p.key)}
+              onSelect={(p) => setPinnedKey((cur) => (cur === p.key ? null : p.key))}
               failed={failed}
             />
           </div>
@@ -96,18 +97,20 @@ export function Live({ status }: LiveProps) {
                 message={status.failure.message}
                 recovery={status.failure.recovery}
               />
-            ) : isDone && status.appUrl ? (
+            ) : isDone && status.appUrl && !pinnedKey ? (
               <DoneHero
                 key="done"
                 appUrl={status.appUrl}
                 credentials={status.credentials}
                 projectName={status.projectName}
+                demo={demo}
               />
             ) : activePhase?.key === "building" ? (
               <BuildCards
                 key="build"
                 backend={status.build?.backend}
                 frontend={status.build?.frontend}
+                config={status.config}
               />
             ) : activePhase?.key === "qa" ? (
               <QaPanel key="qa" qa={status.qa} />
@@ -148,7 +151,7 @@ function Header({ status }: { status: Status }) {
           <Activity className="w-3 h-3" />
           {failed ? "Run halted" : done ? "Run complete" : "Run in progress"}
         </Badge>
-        <h1 className="text-[34px] font-semibold tracking-[-0.02em] text-fg">
+        <h1 className="text-[34px] font-semibold tracking-[-0.03em] text-fg">
           {failed
             ? "Sprint Zero stopped."
             : done
@@ -161,7 +164,7 @@ function Header({ status }: { status: Status }) {
       </div>
       {!failed && !done && (
         <div className="flex items-center gap-2 text-[12px] text-fg-muted">
-          <Loader2 className="w-3.5 h-3.5 animate-spin text-accent" />
+          <Loader2 className="w-3.5 h-3.5 animate-spin text-fg" />
           watching docs/, server/, client/
         </div>
       )}
@@ -173,14 +176,14 @@ function WaitingPlaceholder({ message }: { message?: string }) {
   return (
     <Card className="h-full p-8 flex flex-col justify-center min-h-[400px]">
       <div className="flex items-start gap-4">
-        <Loader2 className="w-5 h-5 text-accent animate-spin mt-0.5" />
+        <Loader2 className="w-5 h-5 text-fg animate-spin mt-0.5" />
         <div>
           <h3 className="text-[16px] font-semibold tracking-tight text-fg">
-            Waiting for the next phase
+            Nothing new yet
           </h3>
           <p className="mt-2 text-[14px] text-fg-muted leading-relaxed max-w-[480px]">
             {message ??
-              "Sprint Zero is preparing the next step. Once a doc lands or a phase changes, this pane will update."}
+              "This pane updates the moment a doc lands in docs/ or the phase changes."}
           </p>
           <div className="mt-6 space-y-3">
             <div className="h-3.5 w-2/3 rounded shimmer" />
@@ -199,8 +202,8 @@ function BriefingPlaceholder() {
       <CardHeader className="px-0 pt-0">
         <CardTitle>Tech-lead build brief</CardTitle>
         <CardDescription>
-          Reading the spec set and synthesising the build plan. The brief lands in the terminal so
-          you can read it before the parallel build starts.
+          The tech lead is reading all six docs and deciding who builds what, on which ports.
+          Its brief prints in the terminal, and the engineers do not start until it does.
         </CardDescription>
       </CardHeader>
       <CardContent className="px-0 pb-0 mt-2 space-y-3">

@@ -19,9 +19,18 @@ If `$ARGUMENTS` is empty, trigger the guided intake (see Step 1). If URLs are pr
 
 Before each spec-writing step, check whether its expected output file already exists in `docs/`. If it does, print a skip message and move to the next step. This makes `/sprint-zero` safe to re-run after a partial failure — it picks up from where the previous run stopped.
 
-If `--fresh` was passed, delete `docs/` before step 2 so all spec steps run from scratch.
+The build and QA phases resume from `.sprint-zero/status.json`, which this command writes at every phase transition whether or not `--present` was passed (see Step 0c). At the start of a run, if that file exists, read it and print `Resuming from phase: <phase>.` Then:
 
-If `--rebuild` was passed, delete `server/` and `client/` before step 9 so the full build runs from scratch.
+- `build.backend` is `"done"` and the backend dir exists → do not re-spawn backend-engineer.
+- `build.frontend` is `"done"` and the frontend dir exists → do not re-spawn frontend-engineer.
+- `phase` is `"launch"` or `"done"` and the code dirs exist → skip straight to Step 11.
+- `phase` is `"failed"` → read `failure.state`, print its recovery instruction, and resume at the step that state names.
+
+Anything marked `"running"` when the previous session broke is treated as not done: re-spawn it. Engineers write their dir from scratch when it is missing and build on what exists when it is present, so a re-spawn after a partial build is safe. `--fresh` and `--rebuild` also delete `.sprint-zero/status.json`.
+
+If `--fresh` was passed, delete `docs/` and `.sprint-zero/status.json` before step 2 so all spec steps run from scratch.
+
+If `--rebuild` was passed, delete `server/` and `client/` (or `app/`, `cli/`) and reset `build` in `.sprint-zero/status.json` before step 9 so the full build runs from scratch.
 
 ## Named failure states
 
@@ -29,7 +38,7 @@ If any step fails unrecoverably, print the named state and a recovery instructio
 
 ```
 STATE: SCOPE_NEEDED       — re-run /sprint-zero <url> with a reachable URL, or run /sprint-zero-scope <url> directly then re-run /sprint-zero <url>
-STATE: DISCOVERY_NEEDED   — fix connectivity or Brave MCP access, then re-run /sprint-zero <url> to resume
+STATE: DISCOVERY_NEEDED   — fix connectivity or web-research tool access (Brave Search MCP, WebSearch/WebFetch, or a browser MCP), then re-run /sprint-zero <url> to resume
 STATE: SPEC_INCOMPLETE    — run the failing command directly (/prd-generator, /decisions-writer, etc.), then re-run /sprint-zero <url> to resume from the build step
 STATE: BUILD_BRIEF_NEEDED — fix the flagged doc issue reported by tech-lead, then re-invoke the tech-lead sub-agent manually
 STATE: BUILD_NEEDED       — re-spawn the failing engineer sub-agent directly, then spawn qa-engineer once both engineers complete
@@ -65,9 +74,9 @@ Print:
 
 > Presenter UI is up at <url>. Walk through the About section to teach the flow, then click "Start a run" to enter the scoping form.
 
-**0c. Status helper for the rest of this run.**
+**0c. Status helper for the rest of this run. This sub-step runs on every invocation, with or without `--present`.**
 
-Whenever a "presenter status update" is mentioned in steps 1–11 below, write a JSON file at `.sprint-zero/status.json` with this shape (keys are optional unless required by the specific step):
+Whenever a "presenter status update" is mentioned in steps 1–11 below, write a JSON file at `.sprint-zero/status.json` with this shape (keys are optional unless required by the specific step). The file is the run's checkpoint: the presenter UI reads it when present, and the Resumability rules above read it after a break.
 
 ```json
 {
@@ -88,7 +97,7 @@ Whenever a "presenter status update" is mentioned in steps 1–11 below, write a
 
 Use `bash` with `cat <<EOF > .sprint-zero/status.json … EOF` to overwrite atomically. Always include `phase`, `message`, and `docs` (the list of files currently in `docs/`). Other keys are additive.
 
-If `--present` was NOT passed, ignore every "presenter status update" instruction in the steps below — the rest of the flow runs identically to before.
+If `--present` was NOT passed, still write every status update (it is one small file and it is what makes a broken run resumable); only skip booting the UI in 0a and 0b.
 
 **0d. Project name.**
 
@@ -174,7 +183,7 @@ If it does not exist:
 1. Write a presenter status update with `phase: "waiting-for-scope"`, `step: "scope"`, `stepNumber: 1`, `message: "Waiting for scope via the presenter UI."`. The UI will land on its scoping form.
 2. Print to the terminal: `Waiting for scope via <presenter-url>. The form will write docs/scope.md when submitted.`
 3. Poll for `docs/scope.md` to exist, checking once every 2 seconds, for up to 15 minutes. Use `bash`: `for i in $(seq 1 450); do [ -f docs/scope.md ] && break; sleep 2; done`.
-4. When the file appears, print `Scope received via presenter UI.` and continue. (The UI's `/api/scope` endpoint already wrote the file in the same format `/sprint-zero-scope` produces.)
+4. When the file appears, print `Scope received via presenter UI.` and continue. (The UI's `/api/scope` endpoint already wrote the file in the same format `/sprint-zero-scope` produces, including the Build configuration block. Then run Step 1b's data-layer preflight if the scope says `supabase`.)
 5. If the loop times out without the file appearing, print `STATE: SCOPE_NEEDED — submit the scoping form in the presenter, or run /sprint-zero again without --present.` and stop.
 
 **Otherwise (no `--present`)** — Read `.claude/commands/sprint-zero-scope.md` and follow its instructions exactly. Do not summarise or simulate — read the actual file and do what it says. Pass the URLs from `$ARGUMENTS` as the arguments that command expects.
@@ -390,11 +399,9 @@ If any sub-step in 11 fails, print `STATE: LAUNCH_FAILED — start the servers m
 
 ---
 
-## Presenter status updates per step (only when `--present` was passed)
+## Status updates per step (always; the presenter reads them when `--present` was passed)
 
-Skip this whole section unless `--present` was set. The flow proceeds identically without it.
-
-When `--present` is active, write `.sprint-zero/status.json` once at the start of each step below, after the existing print statements but before invoking the sub-command. Always re-list the `docs/` directory contents into the `docs` array. Always set `timestamp` to the current ISO 8601 string. Never block on the write — it's atomic and trivially fast.
+Write `.sprint-zero/status.json` once at the start of each step below, after the existing print statements but before invoking the sub-command. Always re-list the `docs/` directory contents into the `docs` array. Always set `timestamp` to the current ISO 8601 string. Never block on the write — it's atomic and trivially fast.
 
 | Step | `phase`     | `stepNumber` | `step`             | `message`                                            |
 | ---- | ----------- | ------------ | ------------------ | ---------------------------------------------------- |
@@ -415,7 +422,7 @@ For step 9 (QA), populate the `qa` block as the engineer's report comes back: `c
 **On step 11f (launch summary)**, write a final status with:
 
 - `phase: "done"`
-- `appUrl: "http://localhost:5173"`
+- `appUrl: "http://localhost:<open-port>"` (the resolved UI port from 11f, not a hardcoded 5173)
 - `credentials: { "email": "<from seed stdout>", "password": "<from seed stdout>" }`
 - `projectName: "<the project name from .sprint-zero/meta.json or step 1>"`
 - `message: "Sprint Zero finished. Open the app."`
