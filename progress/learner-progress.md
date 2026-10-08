@@ -7,7 +7,7 @@
 - Name: [unset]
 - Preferred learning style: Socratic — ask guiding questions, reveal only when stuck
 - Started: 2026-09-06
-- Last session: 2026-10-04
+- Last session: 2026-10-08
 
 ## Module status
 
@@ -15,7 +15,7 @@
 |--------|--------|--------------------|
 | 01 — Agent Foundations, Agent Harness & System Design | completed | Quiz 4/4 (hints on Q1, Q2). Strong on loop mechanics, harness components, guaranteed-vs-flexible split, cost of climbing levels, ReAct vs up-front planning. Exercise 2 (trace the loop) completed. **Built a working harness** in `agent_loop.py` — real Anthropic API loop, 2 stubbed tools, dispatch dict, 3 passes to `end_turn`. |
 | 02 — Skills & Subagents: Product Architecture & Coordination | not started | |
-| 03 — Production Agentic RAG & AI Systems | not started | |
+| 03 — Production Agentic RAG & AI Systems | in progress | 2026-10-06: notebook 002 (Semantic Caching), cache-miss path. Reasoned out unaided that FAISS positions must equal the cache-list row numbers and that the index is empty after a restart (new row #0 in FAISS vs #3 in the lists → wrong answer served on a confident hit). Fixed `load_cache` (rebuild `IndexFlatL2` from persisted embeddings, float32 `(n,768)`, empty guard) and `save_cache` (atomic: `json.dumps` first, `mkstemp` in same dir, `fsync`, `os.replace`, cleanup + re-raise), both verified with a stub-encoder restart test. Stuck on squared-L2 → cosine (`D = 2 − 2cos`), got the threshold conversion (0.30 → cos 0.85) right once shown. 2026-10-08: added a TTL to `SemanticCaching` in `rag_helpers.py`, the learner wrote the code, with reviews. Started out wanting the TTL reset on every hit; accepted that this is sliding expiration (idle eviction), which keeps the most-served answers alive longest, and chose an absolute TTL from creation for freshness. Chose lazy expiry (checked on lookup, swept on load) over a background thread. **Worked out unaided** that an expired match must be removed, not just reported as a miss (otherwise the stale near-duplicate keeps winning the search and every lookup misses). Chose k=5 neighbours and stopping at the first fresh hit. Compacts the lists with a comprehension and rebuilds the index from them. 14/14 tests pass (`/tmp/test_check_cache.py`, real encoder, no API keys). |
 | 04 — Multi-Agent Systems & Orchestration | not started | |
 | 05 — Real-Time Voice Agents & Conversational Systems | not started | |
 | 06 — Leading AI Systems Across Teams | not started | |
@@ -24,6 +24,8 @@
 Status values: not started · in progress · completed · needs review
 
 ## Weak spots to revisit
+- **Name typos that only fail at runtime (M03, 2026-10-08)** — five in one TTL session: `i == 1` for `-1`, `row_ID`, `self.if_expired` then `self.is_expired` for `_is_expired`, `[x for i, q in ...]`. Each passed a read-through and was caught only by running the test. Habit to build: rerun the test after every edit, before asking for review.
+- **Vector distance ↔ cosine algebra (M03)** — couldn't derive that squared L2 on unit vectors is `2 − 2cos` (so cos = 1 − D/2); applied it correctly once walked through. Re-check before thresholds in notebook 003 / ARGUS.
 - **Tools in the agent definition** — twice defined an agent as loop + goal + stop condition, omitting tools/actions. Control flow vs. capability; both are required.
 - **Signal-to-evidence mapping (M01 C3)** — knows the four Level-3 signals but mismapped "30+ flowchart nodes" (branching explosion) to multi-step reasoning. Practice pointing at the specific phrase.
 - Minor: `stop_reason` is an API field the harness inspects, not a token the model emits.
@@ -35,6 +37,8 @@ Status values: not started · in progress · completed · needs review
 - `TOOLS` (schemas) crosses the network; `TOOL_FUNCTIONS` (callables) stays local. Learner asked about this — good instinct, worth reinforcing.
 
 ## Next step
+- **Module 03, 2026-10-08: TTL in `SemanticCaching` (`rag_helpers.py`) done and committed.** `ttl_seconds` (default one week) counts from creation, and a hit doesn't reset it. `check_cache` searches k=5, skips and removes expired rows, and returns the first fresh hit (`row_id` adjusted after removal). `load_cache` gives an old file without timestamps `0.0` per entry and sweeps expired rows; `_remove_rows` filters every list, rebuilds `IndexFlatL2`, saves; `_is_expired` is the one expiry rule. Not run through `agentic_rag_with_cache` (needs OpenAI + SerpApi keys). The `rag_cache.json` in the module folder has no timestamps, so it loads empty on first use. Test script only in `/tmp/test_check_cache.py`, not in the repo. Still open from 2026-10-06: `similarity = 1 - D` should be `1 - D/2` (also in `rag_helpers.py`). Next: notebook 003.
+- **Module 03, 2026-10-06: notebook 002 Semantic Caching, cache-miss path (Socratic).** Learner's `load_cache`/`save_cache` fixes are in the notebook (uncommitted). Open: the hit-log line still prints `1 - D` as "similarity"; the fix is `1 - D/2` (not applied). Discussed but not fixed: if `save_cache` raises after `index.add`, the user gets a `RuntimeError` despite a paid SerpApi answer (memory stays aligned; disk drops the row; restart self-heals). `mkstemp` makes `cache.json` mode 0600. Next: notebook 003 (backend swapped behind `generate_answer`).
 - **LUMINA (Assignment 1), 2026-10-04 (afternoon): deployed, NOT committed.** UI **https://matteopilotto-lumina.vercel.app** (the submission URL), gateway **https://matteopilotto-lumina-gw.fly.dev**, agent + worker in the private Fly app `matteopilotto-lumina-agent` (region `iad`; Atlas answers ~130 ms from Europe and whois says New York, so the cluster is most likely US east).
   - **Files (assignment root):** `Dockerfile` (one image, three processes; runs from `backend/agent` because `cost.ts` reads `../../benchmark/sla.json` and runs go to `../../runs`), `.dockerignore` (no `.env`, only `reports/report.json` from `reports/`), `fly.agent.toml` (no `[http_service]`/`[[services]]`, processes `app` + `worker`, 1 GB each, `/health` check), `fly.gateway.toml` (public, `auto_stop_machines = "off"`, `min_machines_running = 1`, `AGENT_URL=http://matteopilotto-lumina-agent.internal:8000`, `CORS_ORIGINS` = the Vercel URL, 512 MB). Deploy from the assignment root: `fly deploy -c fly.<agent|gateway>.toml --remote-only --ha=false` (local Docker daemon was down, Depot builds remotely).
   - **Gateway code:** `GET /evals/report.json` was still 501 (`NOT_YET`); it now serves `REPORT_PATH` (default `../../reports/report.json`, read per request), 404 with "no report yet" until the eval has run. A new report goes live with a gateway redeploy. Startup log no longer says "every route returns 501". Typecheck + lint pass.

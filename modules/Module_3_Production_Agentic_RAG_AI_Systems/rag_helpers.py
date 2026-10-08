@@ -37,6 +37,7 @@ from openai import OpenAI, OpenAIError
 import qdrant_client as _qdrant_lib
 
 
+
 # ── Module-level shared state (populated by init_rag) ────────────────────────
 _openaiclient   = None
 _serp_api_key   = None
@@ -79,12 +80,18 @@ def init_rag(openai_api_key: str, serp_api_key: str, qdrant_path: str) -> None:
 
 class SemanticCaching:
     """
-    FAISS-backed semantic cache with a time-sensitivity filter.
+    FAISS-backed semantic cache with a time-sensitivity filter and a TTL.
 
     Routing logic for agentic_rag_with_cache():
         is_time_sensitive → True   →  skip cache, run Agentic RAG live
         check_cache       → HIT    →  return stored answer instantly ⚡
         check_cache       → MISS   →  run Agentic RAG, store answer, return
+
+    TTL: every entry records when it was created, and expires ttl_seconds
+    later. A hit does not reset the clock: an answer goes stale with the age
+    of the data it was built from, not with how recently it was read.
+    Expired entries are removed lazily — when check_cache finds one among a
+    query's neighbours, and in bulk by load_cache — not by a background job.
     """
 
     TIME_SENSITIVE_KEYWORDS = [
@@ -104,6 +111,7 @@ class SemanticCaching:
         self,
         json_file: str = "rag_cache.json",
         threshold: float = 0.30,
+        ttl_seconds: int = 60 * 60 * 24 * 7,
         clear_on_init: bool = False,
     ):
         """
@@ -113,12 +121,16 @@ class SemanticCaching:
                             0.30 separates real paraphrases (~0.16–0.25 on the course's
                             demo questions) from merely related questions (~0.38+).
                             Measure this on your own queries; it is a product decision.
+            ttl_seconds:    Max age of an entry, counted from when it was added (a hit
+                            does not reset it). Defaults to one week. Like threshold,
+                            it is a product decision: how stale may a cached answer be?
             clear_on_init:  If True, wipe any existing cache on startup.
         """
         self.embedding_dim = 768
         self.index = faiss.IndexFlatL2(self.embedding_dim)
         self.euclidean_threshold = threshold
         self.json_file = json_file
+        self.ttl_seconds = ttl_seconds
 
         print("Loading Nomic embedding model for semantic cache...")
         self.encoder = SentenceTransformer(
@@ -155,22 +167,33 @@ class SemanticCaching:
 
     def clear_cache(self):
         """Reset in-memory state and overwrite the JSON file."""
-        self.cache = {"questions": [], "embeddings": [], "response_text": []}
+        self.cache = {"questions": [], "embeddings": [], "response_text": [], "timestamps": []}
         self.index = faiss.IndexFlatL2(self.embedding_dim)
         self.save_cache()
         print("Semantic cache cleared.")
 
     def load_cache(self):
-        """Load entries from JSON and rebuild the FAISS index."""
+        """
+        Load entries from JSON, rebuild the FAISS index, and remove expired entries.
+
+        A file saved before timestamps existed gets 0.0 for every entry: their age
+        is unknown, so they are treated as expired and removed on load.
+        """
         try:
             with open(self.json_file, "r") as f:
                 self.cache = json.load(f)
+            if not self.cache.get("timestamps"):
+                self.cache["timestamps"] = [0.0] * len(self.cache["questions"])
             if self.cache["embeddings"]:
                 vecs = np.array(self.cache["embeddings"], dtype=np.float32)
                 self.index.add(vecs)
+            now = time.time()
+            expired = {i for i, t in enumerate(self.cache["timestamps"]) if self._is_expired(t, now)}
+            if expired:
+                self._remove_rows(expired)
             print(f"Cache loaded: {len(self.cache['questions'])} entries.")
         except FileNotFoundError:
-            self.cache = {"questions": [], "embeddings": [], "response_text": []}
+            self.cache = {"questions": [], "embeddings": [], "response_text": [], "timestamps": []}
             print("No existing cache found — starting fresh.")
 
     def save_cache(self):
@@ -182,7 +205,11 @@ class SemanticCaching:
 
     def check_cache(self, question: str):
         """
-        Encode the question and search the FAISS index for a near-enough neighbour.
+        Encode the question and search the FAISS index for a near-enough, unexpired neighbour.
+
+        Looks at the 5 nearest neighbours, closest first, and returns the first one
+        within the threshold that has not expired. Expired neighbours passed on the
+        way are removed from the cache (and the file), so check_cache can modify it.
 
         Returns:
             tuple: (hit, answer, embedding, similarity, row_id)
@@ -190,28 +217,66 @@ class SemanticCaching:
                 answer     (str | None)    — The cached answer, or None on miss
                 embedding  (np.ndarray)    — Computed embedding; reuse on miss to avoid re-encoding
                 similarity (float | None)  — Score in [0, 1], or None on miss
-                row_id     (int | None)    — Cache row index, or None on miss
+                row_id     (int | None)    — Cache row index (after any removal), or None on miss
         """
         embedding = self.encoder.encode([question], normalize_embeddings=True)
 
         if self.index.ntotal == 0:
             return False, None, embedding, None, None
 
-        D, I = self.index.search(embedding, 1)
-        if I[0][0] != -1 and D[0][0] <= self.euclidean_threshold:
-            row_id = int(I[0][0])
-            similarity = float(1.0 - D[0][0])
-            return True, self.cache["response_text"][row_id], embedding, similarity, row_id
+        D, I = self.index.search(embedding, 5)
+        hit = None
+        expired = set()
+        for d, i in zip(D[0], I[0]):
 
+            if i == -1 or d > self.euclidean_threshold:
+                break
+            
+            row_id = int(i)
+            if self._is_expired(self.cache["timestamps"][row_id], time.time()):
+                expired.add(row_id)
+                continue
+
+            hit = (row_id, self.cache["response_text"][row_id], float(1.0 - d))
+            break
+        
+        if expired:
+            self._remove_rows(expired)
+
+        if hit:
+            row_id, answer, similarity = hit
+            row_id = row_id - sum(r < row_id for r in expired)
+            return True, answer, embedding, similarity, row_id
+            
         return False, None, embedding, None, None
 
     def add_to_cache(self, question: str, answer: str, embedding: np.ndarray):
-        """Store a new question-answer pair and persist to disk."""
+        """Store a new question-answer pair with its creation time and persist to disk."""
         self.cache["questions"].append(question)
         self.cache["embeddings"].append(embedding[0].tolist())
         self.cache["response_text"].append(answer)
+        self.cache["timestamps"].append(time.time())
         self.index.add(embedding)
         self.save_cache()
+
+    def _remove_rows(self, ids: set):
+        """
+        Delete the given rows from every cache list, rebuild the FAISS index from
+        what is left, and persist. Rows after a removed one shift down, so any
+        row index held from before the call is stale.
+        """
+        for k in self.cache:
+            self.cache[k] = [x for i, x in enumerate(self.cache[k]) if i not in ids]
+
+        self.index = faiss.IndexFlatL2(self.embedding_dim)
+        if self.cache["embeddings"]:
+            self.index.add(np.array(self.cache["embeddings"],dtype=np.float32))
+
+        self.save_cache()
+
+    def _is_expired(self, ts: float, now: float) -> bool:
+        """True if an entry created at ts (Unix seconds) is older than ttl_seconds at now."""
+        return now - ts > self.ttl_seconds
 
 
 # ── Agentic RAG pipeline internals ───────────────────────────────────────────
