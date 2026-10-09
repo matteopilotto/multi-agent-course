@@ -172,7 +172,7 @@ def route_query(user_query: str) -> dict:
 
 COLLECTIONS = {
     "OPENAI_QUERY": "opnai_data",        # OpenAI Agents documentation (the collection name is misspelled in the DB)
-    "10K_DOCUMENT_QUERY": "10k_data",    # Uber 2021 and Lyft 2024 10-K filings
+    "10K_DOCUMENT_QUERY": "10k_data",    # Uber and Lyft 10-K filings (sources seen: uber_10k_2021, lyft_10k_2020, lyft_10k_2022)
 }
 
 SERPAPI_URL = "https://serpapi.com/search.json"
