@@ -94,18 +94,21 @@ class SemanticCaching:
     query's neighbours, and in bulk by load_cache — not by a background job.
     """
 
-    TIME_SENSITIVE_KEYWORDS = [
-        "today", "tonight", "now", "currently", "current",
-        "latest", "recent", "recently", "right now", "at the moment",
-        "at present", "as of now", "this week", "this month", "this year",
-        "this quarter", "this season", "this morning", "this afternoon",
-        "this evening", "this weekend", "yesterday", "tomorrow",
-        "last week", "last month", "last year", "upcoming", "live",
-        "breaking", "just happened", "what time", "what day", "what date",
-        "happening now", "events today", "news today", "news this week",
-        "stock price", "share price", "weather", "forecast", "temperature",
-        "real-time", "realtime", "schedule today",
+    # Matched as whole words: as plain substrings, "now" fired on "know", "live"
+    # on "deliver" and "current" on the 10-K terms "current ratio" / "current assets".
+    TIME_SENSITIVE_PATTERNS = [
+        r"\b(today|tonight|tomorrow|yesterday)\b",
+        r"\b(now|right now|currently|at the moment|at present|as of now)\b",
+        # "current" is relative, except in accounting terms from the 10-K filings
+        r"\bcurrent\b(?!\s+(assets?|liabilit(y|ies)|ratio|portion|tax))",
+        r"\b(latest|recent|recently|newest|upcoming|breaking|just happened)\b",
+        r"\b(this|last|next|past) (morning|afternoon|evening|night|weekend|week|month|quarter|season|year)\b",
+        r"\b(live|real-?time)\b",
+        r"\b(stock|share) price\b",
+        r"\b(weather|forecast|temperature)\b",
+        r"\bwhat (time|day|date) is it\b",
     ]
+    _TIME_SENSITIVE_RE = re.compile("|".join(TIME_SENSITIVE_PATTERNS), re.IGNORECASE)
 
     def __init__(
         self,
@@ -157,11 +160,13 @@ class SemanticCaching:
 
         Examples that return False → safe to cache:
             'What was Uber revenue in 2021?'
-            'How do OpenAI Agents work?'
-            'What is machine learning?'
+            'What was Uber's current ratio in 2021?'
+            'What do you know about OpenAI Agents?'
+
+        A question whose answer drifts without any time word ('Who is the CEO
+        of Uber?') returns False; the TTL bounds how stale that answer can get.
         """
-        q = question.lower()
-        return any(kw in q for kw in self.TIME_SENSITIVE_KEYWORDS)
+        return self._TIME_SENSITIVE_RE.search(question) is not None
 
     # ── Persistence ───────────────────────────────────────────────────────────
 
