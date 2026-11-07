@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0001 · MCP: what crosses the wire</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<main>
+
+<p class="kicker">Module 4 · Lesson 0001 · ~20 min · before Assignment 3, Stages 1–2</p>
+<h1>MCP: what crosses the wire</h1>
+<p class="subtitle">Before you write <code>tools.yaml</code>, know exactly what the model sees, and what it gets to fill in.</p>
+
+<div class="goal">
+  <p class="label">The one win</p>
+  <p>By the end of this lesson you can name the three MCP roles <em>in your own build</em>,
+  write the two messages that matter from memory, and answer Stage 2's design question with a reason.</p>
+</div>
+
+<h2>1 · Where MCP sits in your build</h2>
+
+<p>Assignment 3 uses all three protocols. In one line each: <span class="tag adk">ADK</span> <em>defines</em>
+the agents, <span class="tag a2a">A2A</span> <em>connects</em> agents running as separate services, and
+<span class="tag mcp">MCP</span> <em>feeds</em> an agent its tools. This lesson covers only the blue arrow.</p>
+
+<figure>
+<svg viewBox="0 0 640 230" width="100%" role="img" aria-label="Your pipeline process contains the ADK agent and toolbox-core; toolbox-core talks MCP to the Toolbox server, which runs SQL against Postgres.">
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#1f5f8b"/></marker>
+    <marker id="ahg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#999"/></marker>
+  </defs>
+  <!-- host process -->
+  <rect x="8" y="30" width="250" height="140" rx="6" fill="none" stroke="#1d1d1b" stroke-width="1.2"/>
+  <text x="18" y="22" font-size="12" fill="#1d1d1b" font-weight="600">Your pipeline process  =  MCP host</text>
+  <rect x="24" y="48" width="218" height="44" rx="4" fill="#2f6b3a" fill-opacity="0.1" stroke="#2f6b3a"/>
+  <text x="133" y="68" font-size="12" text-anchor="middle">ADK LlmAgent</text>
+  <text x="133" y="83" font-size="10" text-anchor="middle" fill="#6b6b66">sends tool schemas to Gemini, gets tool calls back</text>
+  <rect x="24" y="108" width="218" height="44" rx="4" fill="#1f5f8b" fill-opacity="0.1" stroke="#1f5f8b"/>
+  <text x="133" y="128" font-size="12" text-anchor="middle">toolbox-core  =  MCP client</text>
+  <text x="133" y="143" font-size="10" text-anchor="middle" fill="#6b6b66">one connection to one server</text>
+  <!-- MCP arrow -->
+  <line x1="244" y1="130" x2="356" y2="130" stroke="#1f5f8b" stroke-width="2.5" marker-end="url(#ah)"/>
+  <text x="300" y="121" font-size="11" text-anchor="middle" fill="#1f5f8b" font-weight="600">MCP</text>
+  <text x="300" y="148" font-size="10" text-anchor="middle" fill="#1f5f8b">JSON-RPC 2.0</text>
+  <!-- server -->
+  <rect x="360" y="105" width="140" height="50" rx="4" fill="#1f5f8b" fill-opacity="0.1" stroke="#1f5f8b"/>
+  <text x="430" y="126" font-size="12" text-anchor="middle">MCP Toolbox :5000</text>
+  <text x="430" y="141" font-size="10" text-anchor="middle" fill="#6b6b66">= MCP server · reads tools.yaml</text>
+  <!-- postgres -->
+  <line x1="500" y1="130" x2="540" y2="130" stroke="#999" stroke-width="1.5" marker-end="url(#ahg)"/>
+  <text x="520" y="121" font-size="10" text-anchor="middle" fill="#999">SQL</text>
+  <rect x="544" y="105" width="88" height="50" rx="4" fill="none" stroke="#999"/>
+  <text x="588" y="134" font-size="12" text-anchor="middle" fill="#6b6b66">Postgres</text>
+  <!-- A2A, greyed -->
+  <rect x="360" y="190" width="272" height="30" rx="4" fill="none" stroke="#7a4b8c" stroke-dasharray="4 3" opacity="0.6"/>
+  <text x="496" y="210" font-size="11" text-anchor="middle" fill="#7a4b8c" opacity="0.8">Judge :10002 · Masker :10003, over A2A (lesson 0004)</text>
+  <line x1="258" y1="165" x2="356" y2="200" stroke="#7a4b8c" stroke-dasharray="4 3" opacity="0.5"/>
+</svg>
+<figcaption>The part of the TECHNICAL.md §2 diagram this lesson covers. Postgres isn't an MCP participant; it's simply where the server gets its data.</figcaption>
+</figure>
+
+<h2>2 · Three roles, one per box</h2>
+
+<p class="note">Definitions quoted from the official <a href="https://modelcontextprotocol.io/docs/learn/architecture">MCP architecture overview</a>.
+It also says the host creates <em>“one MCP client for each MCP server.”</em></p>
+
+<table>
+  <tr><th>Role</th><th>The spec's definition</th><th>In your build</th></tr>
+  <tr><td><b>Host</b></td><td>“The AI application that coordinates and manages one or multiple MCP clients”</td><td>The process running your pipeline and the ADK agent</td></tr>
+  <tr><td><b>Client</b></td><td>“A component that maintains a connection to an MCP server and obtains context from an MCP server for the MCP host to use”</td><td><code>toolbox-core</code>'s <code>ToolboxClient</code>, inside that process</td></tr>
+  <tr><td><b>Server</b></td><td>“A program that provides context to MCP clients”</td><td>The Toolbox process on <code>:5000</code>, configured by <code>tools.yaml</code></td></tr>
+</table>
+
+<p>Every message between client and server is <b>JSON-RPC 2.0</b>, carried over either <b>stdio</b> (local
+subprocess) or <b>Streamable HTTP</b> (POST, optionally streamed back with SSE). Your build uses HTTP.</p>
+
+<h2>3 · The two messages that matter</h2>
+
+<p>MCP servers can also expose resources and prompts, but your agent only needs <em>tools</em>.
+For tools, two methods do almost all the work.</p>
+
+<h3>tools/list: what the model gets to <em>see</em></h3>
+<p class="note">Trimmed from the spec's own example in <a href="https://modelcontextprotocol.io/specification/latest/server/tools">Tools</a>
+(revision 2026-07-28). The spec leaves out the <code>_meta</code> field that every request carries; this lesson does too.</p>
+<pre><code>// result of tools/list (one tool shown)
+{ "name": "get_weather",
+  "description": "Get current weather information for a location",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "location": { "type": "string", "description": "City name or zip code" }
+    },
+    "required": ["location"] } }</code></pre>
+
+<h3>tools/call: what the model gets to <em>fill in</em></h3>
+<pre><code>{ "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+  "params": { "name": "get_weather",
+              <span class="hl">"arguments": { "location": "New York" }</span> } }</code></pre>
+
+<p>Who chooses that <code>arguments</code> object? The spec puts it plainly: tools are
+<b>“model-controlled, meaning that the language model can discover and invoke tools automatically based
+on its contextual understanding and the user's prompts.”</b></p>
+
+<p>This is the harness you built in Module 1, with one change: the tool list now comes from a server
+instead of your <code>TOOLS</code> dict. One full round:</p>
+
+<ol>
+  <li>The <b>client</b> sends <code>tools/list</code>; the <b>server</b> answers with names, descriptions and schemas.</li>
+  <li>The <b>host</b> passes those schemas to the model along with the conversation.</li>
+  <li>The <b>model</b> answers with a tool call: a name and an arguments object it generated.</li>
+  <li>The <b>client</b> sends that as <code>tools/call</code>; the <b>server</b> runs the tool and returns content.</li>
+  <li>The <b>host</b> appends the result and calls the model again.</li>
+</ol>
+<p class="note">This is your recorded weak spot, “who acts vs. who decides”. Each step has exactly one actor. Say it out loud.</p>
+
+<h2>4 · From tools.yaml to inputSchema</h2>
+
+<p>Toolbox builds those schemas from <code>tools.yaml</code>. Here is the example from the
+<a href="https://github.com/googleapis/mcp-toolbox">Toolbox README</a>, a hotel database, deliberately
+not your shop:</p>
+
+<pre><code>kind: source
+name: my-pg-source
+type: postgres
+host: 127.0.0.1
+port: 5432
+database: toolbox_db
+user: toolbox_user
+password: my-password
+---
+kind: tool
+name: search-hotels-by-name
+type: postgres-sql
+source: my-pg-source
+description: Search for hotels based on name.
+parameters:
+  - name: name
+    type: string
+    description: The name of the hotel.
+statement: SELECT * FROM hotels WHERE name ILIKE '%' || $1 || '%';</code></pre>
+
+<p class="note"><a href="https://mcp-toolbox.dev/integrations/postgres/tools/postgres-sql/">postgres-sql docs</a>:
+“<code>$1</code> will be the first parameter specified, <code>$2</code> will be the second parameter, and so on.”</p>
+
+<p>Read it as a mapping: <code>name</code> and <code>description</code> pass through, and <code>parameters</code> becomes the
+<code>inputSchema</code>. <code>$1</code> is filled from the first parameter. And the <code>statement</code>? Hold that thought.</p>
+
+<div class="task">
+  <p class="label">Try it: predict, then reveal</p>
+  <p>Without scrolling up, write the <code>tools/list</code> entry the model would get for
+  <code>search-hotels-by-name</code>. Then answer: <b>does the SQL statement ever reach the model?</b></p>
+</div>
+<details>
+  <summary>Reveal</summary>
+<pre><code>{ "name": "search-hotels-by-name",
+  "description": "Search for hotels based on name.",
+  "inputSchema": { "type": "object",
+    "properties": { "name": { "type": "string", "description": "The name of the hotel." } },
+    "required": ["name"] } }</code></pre>
+  <p>No. The statement and the source (including the password) stay on the server. The model sees the
+  contract, never the implementation. Toolbox may add fields of its own; you'll see the real output in Stage 2.
+  (<code>required</code> because Toolbox parameters default to <code>required: true</code>.)</p>
+</details>
+
+<div class="callout warn">
+  <p class="label">Source drift: check before Stage 2</p>
+  <p>The current Toolbox docs use this flat format: one YAML document per resource, each with a <code>kind:</code>,
+  separated by <code>---</code>. Older tutorials use top-level <code>sources:</code> / <code>tools:</code> maps.
+  Checked against Toolbox 1.16.0 (<code>--help</code>): <code>--enable-api</code> does exist and adds the
+  <code>/api/tool/&lt;name&gt;/invoke</code> route that TECHNICAL.md's checks use; MCP itself is at <code>/mcp</code>. Default port is 5000,
+  which macOS AirPlay Receiver holds, so this build uses 5050. When in doubt, <code>--help</code> wins over any doc.</p>
+</div>
+
+<h2>5 · When a tool fails</h2>
+<p>MCP has two kinds of failure, and they travel differently
+(<a href="https://modelcontextprotocol.io/specification/latest/server/tools">spec, Error Handling</a>):</p>
+<ul>
+  <li><b>Protocol error</b> (unknown tool, malformed request): a JSON-RPC <code>error</code>, e.g. code <code>-32602</code>.</li>
+  <li><b>Execution error</b> (API failure, bad input, business rule): a normal <code>result</code> with <code>"isError": true</code>,
+  which the client <em>should</em> show to the model so it can correct itself.</li>
+</ul>
+<p>Keep this in mind for Stage 4: a failure that comes back looking like a normal result is easy to miss.
+That's why the assignment says <em>fail loud</em> (SPEC R-4).</p>
+<p>Also remember that the tool's <b>result is the model's fourth view of a tool</b>, after name, description and schema.
+Anything a tool returns, including a raw exception message that contains a request URL with an API key in it,
+goes into the model's context, the reply, and the trace. Return short errors you wrote yourself.</p>
+
+<h2>6 · Retrieval check</h2>
+<p>From memory. Your first click is the one that counts.</p>
+
+<div class="quiz">
+  <div class="q">
+    <p class="prompt">In your Assignment 3 build, which process is the MCP <em>server</em>?</p>
+    <button class="opt">The Postgres database holding the orders</button>
+    <button class="opt">The ADK agent inside your pipeline</button>
+    <button class="opt" data-ok>The Toolbox process on port 5000</button>
+    <button class="opt">The Gemini model choosing the tool</button>
+    <p class="why">The server is the program that serves tools to clients: Toolbox, configured by <code>tools.yaml</code>.
+    Postgres sits behind it and never speaks MCP. The ADK agent's process is the host, and <code>toolbox-core</code> inside it is the client.</p>
+  </div>
+
+  <div class="q">
+    <p class="prompt">What does the model actually see about a tool before calling it?</p>
+    <button class="opt">The SQL statement and its database source</button>
+    <button class="opt" data-ok>Its name and description and input schema</button>
+    <button class="opt">Only the tool name and its toolset</button>
+    <button class="opt">The full tools.yaml file as plain text</button>
+    <p class="why"><code>tools/list</code> returns name, description and <code>inputSchema</code> (plus optional fields like title and annotations).
+    The statement and the connection details never leave the server.</p>
+  </div>
+
+  <div class="q">
+    <p class="prompt">What goes in the <code>params</code> of a <code>tools/call</code> request?</p>
+    <button class="opt">The SQL statement with the values substituted</button>
+    <button class="opt">The logged-in user's session id and email</button>
+    <button class="opt" data-ok>The tool name plus an arguments object</button>
+    <button class="opt">The full conversation history for the model</button>
+    <p class="why"><code>{"name": ..., "arguments": {...}}</code>. That's all. The server knows nothing about your session
+    unless something puts it into those arguments.</p>
+  </div>
+
+  <div class="q">
+    <p class="prompt">By default, who decides the values inside <code>arguments</code>?</p>
+    <button class="opt">The MCP server, reading the user's session</button>
+    <button class="opt">The Postgres database, through its access rules</button>
+    <button class="opt">The host application, before every single call</button>
+    <button class="opt" data-ok>The model, generating them from the schema</button>
+    <p class="why">Tools are “model-controlled”: the model reads the <code>inputSchema</code> and generates the arguments.
+    Keep this one in mind for the next section.</p>
+  </div>
+
+  <div class="q">
+    <p class="prompt">A tool's database query times out. How should a server that follows the spec report it?</p>
+    <button class="opt">A JSON-RPC error with an error code</button>
+    <button class="opt" data-ok>A normal result with isError set true</button>
+    <button class="opt">An empty content array and no flag</button>
+    <button class="opt">A closed connection the client must retry</button>
+    <p class="why">An execution failure is a result with <code>isError: true</code>, so the model can see it and react.
+    JSON-RPC errors are for protocol problems such as an unknown tool name.</p>
+  </div>
+</div>
+
+<h2>7 · Now build: Stages 1 and 2</h2>
+
+<p><b>Stage 1</b> (the database) needs no MCP at all. Open
+<a href="../../Assignment_3_Customer_Support/TECHNICAL.md">TECHNICAL.md §4</a>, answer its <em>You decide</em>
+(how does a run start from a known state?) in your <code>BUILD_LOG.md</code>, then build and run its three checks.</p>
+
+<div class="task">
+  <p class="label">Stage 2's decision. Don't read SPEC R-1 yet</p>
+  <p>The question: <b>where is “a customer may only see their own orders” enforced?</b></p>
+  <p>To reason it out, use only what's on this page. Alice is logged in and types
+  <em>“what's the status of order 5?”</em> Order 5 is Bob's. Go through §3's five steps and, at each one,
+  ask who could put which email into <code>arguments</code>, and what would stop them.</p>
+  <p>Write your answer and your reason in <code>BUILD_LOG.md</code>. Then bring it to me and I'll push back on it.</p>
+</div>
+
+<h2>Read next</h2>
+<p><b>Primary source:</b> <a href="https://modelcontextprotocol.io/docs/learn/architecture">MCP Architecture overview</a>
+(about 15 min). Then skim the <a href="https://modelcontextprotocol.io/specification/latest/server/tools">Tools page of the spec</a>
+for the “Security Considerations” list. It reads differently once you've done Stage 2.</p>
+
+<p class="ask">Anything unclear, or you want to go deeper (why the 2026 spec dropped the handshake, stdio vs HTTP, what annotations are for)?
+<b>Ask me in Claude Code.</b> I'm your tutor for this, and questions are the fastest way through.</p>
+
+<div class="nav">
+  <span>Start of module</span>
+  <a href="../reference/mcp-cheatsheet.html">MCP cheat sheet →</a>
+  <span>Next: 0002 · ADK (after Stage 2)</span>
+</div>
+
+</main>
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

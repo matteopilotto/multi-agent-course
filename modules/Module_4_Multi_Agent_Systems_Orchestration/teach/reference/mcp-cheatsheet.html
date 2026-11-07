@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reference · MCP cheat sheet</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<main>
+
+<p class="kicker">Reference · <span class="tag mcp">MCP</span> · spec revision 2026-07-28</p>
+<h1>MCP cheat sheet</h1>
+<p class="subtitle">Roles, the two tool messages, Toolbox config, errors. Taught in
+<a href="../lessons/0001-mcp-what-crosses-the-wire.html">lesson 0001</a>.</p>
+
+<h2>Roles</h2>
+<table>
+  <tr><th>Role</th><th>Is</th><th>Assignment 3</th></tr>
+  <tr><td>Host</td><td>The AI app; manages one client per server</td><td>Pipeline process + ADK agent</td></tr>
+  <tr><td>Client</td><td>Holds one connection to one server</td><td><code>toolbox-core</code> <code>ToolboxClient</code></td></tr>
+  <tr><td>Server</td><td>Serves tools/resources/prompts to clients</td><td>Toolbox <code>:5000</code> (<code>/mcp</code>)</td></tr>
+</table>
+<p>Wire: JSON-RPC 2.0. Transports: <b>stdio</b> (local subprocess) · <b>Streamable HTTP</b> (POST + optional SSE).
+The 2026-07-28 revision is stateless: <code>_meta</code> on every request, <code>server/discover</code>, no <code>initialize</code> handshake.
+<a href="https://modelcontextprotocol.io/docs/learn/architecture">architecture</a> ·
+<a href="https://modelcontextprotocol.io/specification/latest">spec</a></p>
+
+<h2>Who talks to whom</h2>
+<figure>
+<svg viewBox="0 0 640 400" width="100%" role="img" aria-label="Model talks only to the Cursor host over a chat API. The host contains two MCP clients; each client talks MCP to one server: Jira and GitHub. Each server calls its own API with its own token.">
+  <defs>
+    <marker id="b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#1f5f8b"/></marker>
+    <marker id="k" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#1d1d1b"/></marker>
+    <marker id="g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#999"/></marker>
+  </defs>
+  <!-- model -->
+  <rect x="210" y="8" width="220" height="46" rx="5" fill="#f3f0e8" stroke="#1d1d1b"/>
+  <text x="320" y="28" font-size="13" text-anchor="middle" font-weight="600">Model</text>
+  <text x="320" y="44" font-size="10" text-anchor="middle" fill="#6b6b66">LLM provider · never sees a server</text>
+  <!-- chat api -->
+  <line x1="320" y1="56" x2="320" y2="114" stroke="#1d1d1b" stroke-width="1.6" marker-start="url(#k)" marker-end="url(#k)"/>
+  <text x="310" y="80" font-size="11" text-anchor="end" font-weight="600">chat API (not MCP)</text>
+  <text x="330" y="78" font-size="10" fill="#6b6b66">↓ history + tool schemas</text>
+  <text x="330" y="92" font-size="10" fill="#6b6b66">↑ tool call, or final text</text>
+  <!-- host -->
+  <rect x="10" y="116" width="620" height="140" rx="7" fill="none" stroke="#1d1d1b" stroke-width="1.4"/>
+  <text x="22" y="134" font-size="12" font-weight="600">Cursor = HOST (your laptop)</text>
+  <text x="320" y="152" font-size="11" text-anchor="middle" fill="#6b6b66">you · UI · history · agent loop · approvals · routes each call to the right client</text>
+  <line x1="170" y1="160" x2="170" y2="190" stroke="#1d1d1b" marker-start="url(#k)" marker-end="url(#k)"/>
+  <line x1="470" y1="160" x2="470" y2="190" stroke="#1d1d1b" marker-start="url(#k)" marker-end="url(#k)"/>
+  <text x="178" y="179" font-size="9" fill="#6b6b66">function call</text>
+  <text x="478" y="179" font-size="9" fill="#6b6b66">function call</text>
+  <rect x="90" y="192" width="160" height="44" rx="4" fill="#1f5f8b" fill-opacity="0.1" stroke="#1f5f8b"/>
+  <text x="170" y="219" font-size="12" text-anchor="middle">MCP client 1</text>
+  <rect x="390" y="192" width="160" height="44" rx="4" fill="#1f5f8b" fill-opacity="0.1" stroke="#1f5f8b"/>
+  <text x="470" y="219" font-size="12" text-anchor="middle">MCP client 2</text>
+  <!-- MCP -->
+  <line x1="170" y1="238" x2="170" y2="290" stroke="#1f5f8b" stroke-width="2.2" marker-start="url(#b)" marker-end="url(#b)"/>
+  <line x1="470" y1="238" x2="470" y2="290" stroke="#1f5f8b" stroke-width="2.2" marker-start="url(#b)" marker-end="url(#b)"/>
+  <text x="180" y="276" font-size="10" fill="#1f5f8b" font-weight="600">MCP · tools/list · tools/call</text>
+  <text x="480" y="276" font-size="10" fill="#1f5f8b" font-weight="600">MCP</text>
+  <!-- servers -->
+  <rect x="90" y="292" width="160" height="44" rx="4" fill="#1f5f8b" fill-opacity="0.1" stroke="#1f5f8b"/>
+  <text x="170" y="319" font-size="12" text-anchor="middle">Jira MCP server</text>
+  <rect x="390" y="292" width="160" height="44" rx="4" fill="#1f5f8b" fill-opacity="0.1" stroke="#1f5f8b"/>
+  <text x="470" y="319" font-size="12" text-anchor="middle">GitHub MCP server</text>
+  <!-- backends -->
+  <line x1="170" y1="338" x2="170" y2="366" stroke="#999" marker-end="url(#g)"/>
+  <line x1="470" y1="338" x2="470" y2="366" stroke="#999" marker-end="url(#g)"/>
+  <text x="180" y="356" font-size="9" fill="#999">REST + Jira token</text>
+  <text x="480" y="356" font-size="9" fill="#999">REST + GitHub token</text>
+  <text x="170" y="386" font-size="12" text-anchor="middle" fill="#6b6b66">Jira</text>
+  <text x="470" y="386" font-size="12" text-anchor="middle" fill="#6b6b66">GitHub</text>
+</svg>
+<figcaption>Cursor with two MCP servers. Path: model ⇄ host ⇄ client ⇄ server. Only the host touches both sides, so approvals, guards and logging go there.
+In Assignment 3 the same shape is: pipeline (host) · ToolboxClient (client) · Toolbox :5000 (server) · Postgres.</figcaption>
+</figure>
+
+<h2>The two tool messages</h2>
+<table>
+  <tr><th>Method</th><th>Carries</th><th>Filled by</th></tr>
+  <tr><td><code>tools/list</code> → result</td><td><code>name</code>, <code>description</code>, <code>inputSchema</code> (+ optional <code>title</code>, <code>outputSchema</code>, <code>annotations</code>)</td><td>Server (from <code>tools.yaml</code>)</td></tr>
+  <tr><td><code>tools/call</code> → params</td><td><code>name</code>, <code>arguments</code></td><td>The <b>model</b> (“model-controlled”)</td></tr>
+  <tr><td><code>tools/call</code> → result</td><td><code>content[]</code>, <code>isError</code></td><td>Server</td></tr>
+</table>
+<p>The round trip: client lists → host gives schemas to the model → model emits a call → client sends <code>tools/call</code> → server runs it → host appends the result and calls the model again.</p>
+
+<h2>Errors</h2>
+<table>
+  <tr><td>Protocol (unknown tool, malformed)</td><td>JSON-RPC <code>error</code>, e.g. <code>-32602</code></td></tr>
+  <tr><td>Execution (API, validation, business rule)</td><td><code>result</code> with <code>"isError": true</code>; shown to the model</td></tr>
+</table>
+<p>Annotations are untrusted unless the server is trusted. <a href="https://modelcontextprotocol.io/specification/latest/server/tools">tools spec</a></p>
+
+<h2>Toolbox <code>tools.yaml</code> (current flat format)</h2>
+<pre><code>kind: source            # one YAML document per resource, separated by ---
+name: my-pg-source
+type: postgres
+host: 127.0.0.1
+port: 5432
+database: toolbox_db
+user: toolbox_user
+password: ${PASSWORD}   # env var substitution
+---
+kind: tool
+name: search-hotels-by-name
+type: postgres-sql
+source: my-pg-source
+description: Search for hotels based on name.      # → model sees
+parameters:                                         # → inputSchema
+  - name: name
+    type: string
+    description: The name of the hotel.
+statement: SELECT * FROM hotels WHERE name ILIKE '%' || $1 || '%';   # never leaves the server
+---
+kind: toolset
+name: my_first_toolset
+tools:
+  - search-hotels-by-name</code></pre>
+<p><code>$1, $2…</code> = parameters in order. Parameters default to <code>required: true</code>.
+<a href="https://github.com/googleapis/mcp-toolbox">README</a> ·
+<a href="https://mcp-toolbox.dev/integrations/postgres/tools/postgres-sql/">postgres-sql</a></p>
+
+<h2>Enforced vs. stated</h2>
+<p>A rule is <b>enforced</b> where it holds even if the model is tricked or wrong (a lock), and only <b>stated</b> where it relies on the model obeying (a sign).
+Test: <i>if the model misbehaved, would the rule still hold here?</i></p>
+<table>
+  <tr><th>Rule</th><th>Sign</th><th>Lock</th></tr>
+  <tr><td>Action type in the enum (M-7)</td><td>Parameter description</td><td><code>CHECK</code> constraint</td></tr>
+  <tr><td>Orders never mutated (M-6)</td><td>Prompt</td><td>No mutating tool + only <code>GRANT SELECT</code></td></tr>
+  <tr><td>Only your own orders (M-4, M-5)</td><td>“Only this user” in the prompt</td><td><code>WHERE … AND customer_email = $2</code> with the email <b>bound by the host</b></td></tr>
+</table>
+
+<h2>Bound parameters: identity from the host, not the model</h2>
+<pre><code>ToolboxClient → load_tool("get-order-status",
+                          bound_params={"customer_email": session_email})   # value or callable</code></pre>
+<p>The host (which ran the login) supplies the value. The docs say bound values are “not requested or modified by the LLM”.
+Still to check: print the loaded tool's schema and confirm the bound parameter is missing from it.
+<a href="https://mcp-toolbox.dev/documentation/connect-to/toolbox-sdks/python-sdk/core/">toolbox-core docs</a></p>
+
+<h2>Run and load</h2>
+<pre><code>npx @toolbox-sdk/server --config tools.yaml     # MCP at http://127.0.0.1:5000/mcp
+                                               # one toolset: /mcp/&lt;toolset_name&gt;</code></pre>
+<pre><code>from toolbox_core import ToolboxClient
+async with ToolboxClient("http://127.0.0.1:5000") as toolbox:   # speaks MCP by default
+    tool  = await toolbox.load_tool("get_weather")
+    tools = await toolbox.load_toolset("toolset_name")
+    result = await tool(location="London")</code></pre>
+<p><a href="https://mcp-toolbox.dev/documentation/connect-to/toolbox-sdks/python-sdk/core/">toolbox-core docs</a> (v1.4.0).
+<code>--enable-api</code> adds <code>/api/tool/&lt;name&gt;/invoke</code> (verified, v1.16.0). Lock it to local callers with <code>--allowed-hosts 127.0.0.1,localhost</code>.</p>
+
+</main>
+</body>
+</html>
