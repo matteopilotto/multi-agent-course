@@ -26,39 +26,53 @@ the agents, <span class="tag a2a">A2A</span> <em>connects</em> agents running as
 <span class="tag mcp">MCP</span> <em>feeds</em> an agent its tools. This lesson covers only the blue arrow.</p>
 
 <figure>
-<svg viewBox="0 0 640 230" width="100%" role="img" aria-label="Your pipeline process contains the ADK agent and toolbox-core; toolbox-core talks MCP to the Toolbox server, which runs SQL against Postgres.">
+<svg viewBox="0 0 640 432" width="100%" role="img" aria-label="Gemini talks only to the ADK LlmAgent inside your pipeline process, which is the host, over a chat API. The agent calls toolbox-core, the MCP client, as a function. The client talks MCP over Streamable HTTP to the Toolbox server on port 5000, which runs SQL against Postgres. The Judge and Masker agents are reached from the host over A2A.">
   <defs>
-    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#1f5f8b"/></marker>
-    <marker id="ahg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#999"/></marker>
+    <marker id="b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#1f5f8b"/></marker>
+    <marker id="k" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#1d1d1b"/></marker>
+    <marker id="g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#999"/></marker>
   </defs>
-  <!-- host process -->
-  <rect x="8" y="30" width="250" height="140" rx="6" fill="none" stroke="#1d1d1b" stroke-width="1.2"/>
-  <text x="18" y="22" font-size="12" fill="#1d1d1b" font-weight="600">Your pipeline process  =  MCP host</text>
-  <rect x="24" y="48" width="218" height="44" rx="4" fill="#2f6b3a" fill-opacity="0.1" stroke="#2f6b3a"/>
-  <text x="133" y="68" font-size="12" text-anchor="middle">ADK LlmAgent</text>
-  <text x="133" y="83" font-size="10" text-anchor="middle" fill="#6b6b66">sends tool schemas to Gemini, gets tool calls back</text>
-  <rect x="24" y="108" width="218" height="44" rx="4" fill="#1f5f8b" fill-opacity="0.1" stroke="#1f5f8b"/>
-  <text x="133" y="128" font-size="12" text-anchor="middle">toolbox-core  =  MCP client</text>
-  <text x="133" y="143" font-size="10" text-anchor="middle" fill="#6b6b66">one connection to one server</text>
-  <!-- MCP arrow -->
-  <line x1="244" y1="130" x2="356" y2="130" stroke="#1f5f8b" stroke-width="2.5" marker-end="url(#ah)"/>
-  <text x="300" y="121" font-size="11" text-anchor="middle" fill="#1f5f8b" font-weight="600">MCP</text>
-  <text x="300" y="148" font-size="10" text-anchor="middle" fill="#1f5f8b">JSON-RPC 2.0</text>
+  <!-- model -->
+  <rect x="210" y="8" width="220" height="46" rx="5" fill="#f3f0e8" stroke="#1d1d1b"/>
+  <text x="320" y="28" font-size="13" text-anchor="middle" font-weight="600">Model</text>
+  <text x="320" y="44" font-size="10" text-anchor="middle" fill="#6b6b66">Gemini · never sees a server</text>
+  <!-- chat api -->
+  <line x1="320" y1="56" x2="320" y2="142" stroke="#1d1d1b" stroke-width="1.6" marker-start="url(#k)" marker-end="url(#k)"/>
+  <text x="330" y="74" font-size="11" font-weight="600">chat API (not MCP)</text>
+  <text x="330" y="88" font-size="10" fill="#6b6b66">↓ history + tool schemas</text>
+  <text x="330" y="102" font-size="10" fill="#6b6b66">↑ tool call, or final text</text>
+  <!-- host -->
+  <rect x="10" y="116" width="620" height="158" rx="7" fill="none" stroke="#1d1d1b" stroke-width="1.4"/>
+  <text x="22" y="134" font-size="12" font-weight="600">Your pipeline process = HOST</text>
+  <rect x="200" y="144" width="240" height="44" rx="4" fill="#2f6b3a" fill-opacity="0.1" stroke="#2f6b3a"/>
+  <text x="320" y="162" font-size="12" text-anchor="middle">ADK LlmAgent</text>
+  <text x="320" y="179" font-size="9" text-anchor="middle" fill="#6b6b66">agent loop · runs each tool call the model asks for</text>
+  <line x1="320" y1="190" x2="320" y2="216" stroke="#1d1d1b" marker-start="url(#k)" marker-end="url(#k)"/>
+  <text x="328" y="207" font-size="9" fill="#6b6b66">function call</text>
+  <rect x="200" y="218" width="240" height="44" rx="4" fill="#1f5f8b" fill-opacity="0.1" stroke="#1f5f8b"/>
+  <text x="320" y="236" font-size="12" text-anchor="middle">MCP client</text>
+  <text x="320" y="253" font-size="9" text-anchor="middle" fill="#6b6b66">toolbox-core ToolboxClient · one per server</text>
+  <!-- MCP -->
+  <line x1="320" y1="264" x2="320" y2="318" stroke="#1f5f8b" stroke-width="2.2" marker-start="url(#b)" marker-end="url(#b)"/>
+  <text x="330" y="292" font-size="10" fill="#1f5f8b" font-weight="600">MCP · Streamable HTTP</text>
+  <text x="330" y="305" font-size="9" fill="#1f5f8b">JSON-RPC 2.0 · tools/list · tools/call</text>
   <!-- server -->
-  <rect x="360" y="105" width="140" height="50" rx="4" fill="#1f5f8b" fill-opacity="0.1" stroke="#1f5f8b"/>
-  <text x="430" y="126" font-size="12" text-anchor="middle">MCP Toolbox :5000</text>
-  <text x="430" y="141" font-size="10" text-anchor="middle" fill="#6b6b66">= MCP server · reads tools.yaml</text>
-  <!-- postgres -->
-  <line x1="500" y1="130" x2="540" y2="130" stroke="#999" stroke-width="1.5" marker-end="url(#ahg)"/>
-  <text x="520" y="121" font-size="10" text-anchor="middle" fill="#999">SQL</text>
-  <rect x="544" y="105" width="88" height="50" rx="4" fill="none" stroke="#999"/>
-  <text x="588" y="134" font-size="12" text-anchor="middle" fill="#6b6b66">Postgres</text>
-  <!-- A2A, greyed -->
-  <rect x="360" y="190" width="272" height="30" rx="4" fill="none" stroke="#7a4b8c" stroke-dasharray="4 3" opacity="0.6"/>
-  <text x="496" y="210" font-size="11" text-anchor="middle" fill="#7a4b8c" opacity="0.8">Judge :10002 · Masker :10003, over A2A (lesson 0004)</text>
-  <line x1="258" y1="165" x2="356" y2="200" stroke="#7a4b8c" stroke-dasharray="4 3" opacity="0.5"/>
+  <rect x="200" y="320" width="240" height="44" rx="4" fill="#1f5f8b" fill-opacity="0.1" stroke="#1f5f8b"/>
+  <text x="320" y="338" font-size="12" text-anchor="middle">Toolbox MCP server :5000</text>
+  <text x="320" y="355" font-size="9" text-anchor="middle" fill="#6b6b66">/mcp · tools from tools.yaml</text>
+  <!-- backend -->
+  <line x1="320" y1="366" x2="320" y2="394" stroke="#999" marker-end="url(#g)"/>
+  <text x="330" y="384" font-size="9" fill="#999">SQL</text>
+  <text x="320" y="414" font-size="12" text-anchor="middle" fill="#6b6b66">Postgres</text>
+  <!-- A2A, greyed: not this lesson -->
+  <line x1="548" y1="276" x2="548" y2="318" stroke="#7a4b8c" stroke-dasharray="4 3" opacity="0.5"/>
+  <text x="556" y="300" font-size="10" fill="#7a4b8c" opacity="0.8">A2A</text>
+  <rect x="462" y="320" width="172" height="44" rx="4" fill="none" stroke="#7a4b8c" stroke-dasharray="4 3" opacity="0.6"/>
+  <text x="548" y="338" font-size="11" text-anchor="middle" fill="#7a4b8c" opacity="0.8">Judge :10002 · Masker :10003</text>
+  <text x="548" y="355" font-size="9" text-anchor="middle" fill="#7a4b8c" opacity="0.8">separate agents · lesson 0004</text>
 </svg>
-<figcaption>The part of the TECHNICAL.md §2 diagram this lesson covers. Postgres isn't an MCP participant; it's simply where the server gets its data.</figcaption>
+<figcaption>The part of the TECHNICAL.md §2 diagram this lesson covers. Path: model ⇄ agent ⇄ client ⇄ server. The model never talks MCP;
+the host does, through its client. Postgres isn't an MCP participant; it's simply where the server gets its data.</figcaption>
 </figure>
 
 <h2>2 · Three roles, one per box</h2>
@@ -268,7 +282,7 @@ for the “Security Considerations” list. It reads differently once you've don
 <div class="nav">
   <span>Start of module</span>
   <a href="../reference/mcp-cheatsheet.html">MCP cheat sheet →</a>
-  <span>Next: 0002 · ADK (after Stage 2)</span>
+  <a href="0002-adk-the-runner-is-your-loop.html">0002 · ADK: the Runner is your loop →</a>
 </div>
 
 </main>

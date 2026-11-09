@@ -27,6 +27,7 @@ The 2026-07-28 revision is stateless: <code>_meta</code> on every request, <code
 <a href="https://modelcontextprotocol.io/specification/latest">spec</a></p>
 
 <h2>Who talks to whom</h2>
+<h3>Example 1 · Coding assistant (Cursor)</h3>
 <figure>
 <svg viewBox="0 0 640 400" width="100%" role="img" aria-label="Model talks only to the Cursor host over a chat API. The host contains two MCP clients; each client talks MCP to one server: Jira and GitHub. Each server calls its own API with its own token.">
   <defs>
@@ -76,6 +77,172 @@ The 2026-07-28 revision is stateless: <code>_meta</code> on every request, <code
 <figcaption>Cursor with two MCP servers. Path: model ⇄ host ⇄ client ⇄ server. Only the host touches both sides, so approvals, guards and logging go there.
 In Assignment 3 the same shape is: pipeline (host) · ToolboxClient (client) · Toolbox :5000 (server) · Postgres.</figcaption>
 </figure>
+
+<h3>Example 2 · Crash-bug triage at a game studio</h3>
+<p>QA files a crash bug. Before a producer reads it, an agent has already commented with the changelist that most likely caused it,
+the team that owns that system and a link to the design page.</p>
+<figure>
+<svg viewBox="0 0 640 400" width="100%" role="img" aria-label="A Jira webhook wakes a triage service on Cloud Run, which is the host. The host talks to Gemini on Vertex AI over a chat API. The host contains three MCP clients: one talks Streamable HTTP to a Jira MCP server, one talks stdio to a Perforce MCP server running as a subprocess, one talks Streamable HTTP to a Confluence MCP server. Each server calls its own backend with its own narrow credential.">
+  <defs>
+    <marker id="b2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#1f5f8b"/></marker>
+    <marker id="k2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#1d1d1b"/></marker>
+    <marker id="g2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#999"/></marker>
+  </defs>
+  <!-- trigger -->
+  <rect x="10" y="8" width="170" height="46" rx="5" fill="none" stroke="#999" stroke-dasharray="4 3"/>
+  <text x="95" y="28" font-size="12" text-anchor="middle" font-weight="600">Jira webhook</text>
+  <text x="95" y="44" font-size="10" text-anchor="middle" fill="#6b6b66">“new crash bug filed”</text>
+  <line x1="95" y1="56" x2="95" y2="114" stroke="#999" stroke-width="1.4" marker-end="url(#g2)"/>
+  <text x="103" y="82" font-size="10" font-weight="600" fill="#6b6b66">wakes the host</text>
+  <text x="103" y="96" font-size="10" fill="#6b6b66">plain HTTP, not MCP</text>
+  <!-- model -->
+  <rect x="210" y="8" width="220" height="46" rx="5" fill="#f3f0e8" stroke="#1d1d1b"/>
+  <text x="320" y="28" font-size="13" text-anchor="middle" font-weight="600">Model</text>
+  <text x="320" y="44" font-size="10" text-anchor="middle" fill="#6b6b66">Gemini on Vertex AI · never sees a server</text>
+  <!-- chat api -->
+  <line x1="320" y1="56" x2="320" y2="114" stroke="#1d1d1b" stroke-width="1.6" marker-start="url(#k2)" marker-end="url(#k2)"/>
+  <text x="330" y="74" font-size="11" font-weight="600">chat API (not MCP)</text>
+  <text x="330" y="88" font-size="10" fill="#6b6b66">↓ bug + filtered tool schemas</text>
+  <text x="330" y="102" font-size="10" fill="#6b6b66">↑ tool call, or the comment text</text>
+  <!-- host -->
+  <rect x="10" y="116" width="620" height="140" rx="7" fill="none" stroke="#1d1d1b" stroke-width="1.4"/>
+  <text x="22" y="134" font-size="12" font-weight="600">Triage service = HOST (Python on Cloud Run, no chat window)</text>
+  <text x="320" y="152" font-size="11" text-anchor="middle" fill="#6b6b66">agent loop · passes the model only read tools + add_comment · logs every call</text>
+  <line x1="110" y1="160" x2="110" y2="190" stroke="#1d1d1b" marker-start="url(#k2)" marker-end="url(#k2)"/>
+  <line x1="320" y1="160" x2="320" y2="190" stroke="#1d1d1b" marker-start="url(#k2)" marker-end="url(#k2)"/>
+  <line x1="530" y1="160" x2="530" y2="190" stroke="#1d1d1b" marker-start="url(#k2)" marker-end="url(#k2)"/>
+  <rect x="35" y="192" width="150" height="44" rx="4" fill="#1f5f8b" fill-opacity="0.1" stroke="#1f5f8b"/>
+  <text x="110" y="219" font-size="12" text-anchor="middle">MCP client 1</text>
+  <rect x="245" y="192" width="150" height="44" rx="4" fill="#1f5f8b" fill-opacity="0.1" stroke="#1f5f8b"/>
+  <text x="320" y="219" font-size="12" text-anchor="middle">MCP client 2</text>
+  <rect x="455" y="192" width="150" height="44" rx="4" fill="#1f5f8b" fill-opacity="0.1" stroke="#1f5f8b"/>
+  <text x="530" y="219" font-size="12" text-anchor="middle">MCP client 3</text>
+  <!-- MCP, two transports -->
+  <line x1="110" y1="238" x2="110" y2="290" stroke="#1f5f8b" stroke-width="2.2" marker-start="url(#b2)" marker-end="url(#b2)"/>
+  <line x1="320" y1="238" x2="320" y2="290" stroke="#1f5f8b" stroke-width="2.2" marker-start="url(#b2)" marker-end="url(#b2)"/>
+  <line x1="530" y1="238" x2="530" y2="290" stroke="#1f5f8b" stroke-width="2.2" marker-start="url(#b2)" marker-end="url(#b2)"/>
+  <text x="120" y="270" font-size="10" fill="#1f5f8b" font-weight="600">Streamable HTTP</text>
+  <text x="330" y="270" font-size="10" fill="#1f5f8b" font-weight="600">stdio · subprocess</text>
+  <text x="540" y="270" font-size="10" fill="#1f5f8b" font-weight="600">Streamable HTTP</text>
+  <!-- servers -->
+  <rect x="35" y="292" width="150" height="44" rx="4" fill="#1f5f8b" fill-opacity="0.1" stroke="#1f5f8b"/>
+  <text x="110" y="310" font-size="12" text-anchor="middle">Jira MCP server</text>
+  <text x="110" y="327" font-size="9" text-anchor="middle" fill="#6b6b66">get_issue · add_comment</text>
+  <rect x="245" y="292" width="150" height="44" rx="4" fill="#1f5f8b" fill-opacity="0.1" stroke="#1f5f8b"/>
+  <text x="320" y="310" font-size="12" text-anchor="middle">Perforce MCP server</text>
+  <text x="320" y="327" font-size="9" text-anchor="middle" fill="#6b6b66">changes_for_path · describe</text>
+  <rect x="455" y="292" width="150" height="44" rx="4" fill="#1f5f8b" fill-opacity="0.1" stroke="#1f5f8b"/>
+  <text x="530" y="310" font-size="12" text-anchor="middle">Confluence MCP server</text>
+  <text x="530" y="327" font-size="9" text-anchor="middle" fill="#6b6b66">search · get_page</text>
+  <!-- backends -->
+  <line x1="110" y1="338" x2="110" y2="366" stroke="#999" marker-end="url(#g2)"/>
+  <line x1="320" y1="338" x2="320" y2="366" stroke="#999" marker-end="url(#g2)"/>
+  <line x1="530" y1="338" x2="530" y2="366" stroke="#999" marker-end="url(#g2)"/>
+  <text x="120" y="356" font-size="9" fill="#999">REST + bot token</text>
+  <text x="330" y="356" font-size="9" fill="#999">p4 CLI + read-only user</text>
+  <text x="540" y="356" font-size="9" fill="#999">REST + bot token</text>
+  <text x="110" y="386" font-size="12" text-anchor="middle" fill="#6b6b66">Jira (bugs)</text>
+  <text x="320" y="386" font-size="12" text-anchor="middle" fill="#6b6b66">Perforce depot (code, assets)</text>
+  <text x="530" y="386" font-size="12" text-anchor="middle" fill="#6b6b66">Confluence (design docs)</text>
+</svg>
+<figcaption>Path: webhook → host → model ⇄ host ⇄ three clients ⇄ three servers. The agent reads the bug and its stack trace (client 1),
+lists the recent changelists that touched the crashing file (client 2), finds the page of the team that owns that system (client 3),
+then posts one comment back through client 1. Reassigning or closing the bug stays with a human.</figcaption>
+</figure>
+<p>What this adds to Example 1:</p>
+<ul>
+  <li><b>A host needs no chat window.</b> A webhook starts the loop. The host is whatever process runs the loop and holds the clients.</li>
+  <li><b>Jira appears twice, by two routes.</b> The webhook that wakes the host is plain HTTP. The tools the agent reads and writes through are MCP.</li>
+  <li><b>Transports can mix in one host.</b> Remote servers over Streamable HTTP, a local one launched as a stdio subprocess in the same container.</li>
+  <li><b>The host filters the tool list: a lock.</b> Even if the Jira server lists tools that reassign or close issues, the host never passes them to the model, so the agent cannot call them, however it is prompted.</li>
+  <li><b>Each server has its own narrow credential.</b> The Perforce user is read-only, so even a wrong call cannot submit a changelist.</li>
+</ul>
+<details>
+<summary>How the webhook works</summary>
+<p>A webhook is a reverse API call: instead of the host polling Jira every minute (“any new bugs?”), Jira calls the host when the event happens.
+Set up once: a Jira admin registers a URL (e.g. <code>https://triage-xyz.run.app/jira-events</code>) and a filter (issue created, type = Crash).
+Then, on each matching event, Jira sends an HTTP POST with a JSON body:</p>
+<pre><code>{"webhookEvent": "jira:issue_created",
+ "issue": {"key": "GAME-4812", "fields": {"summary": "Crash in AnimGraph..."}}}</code></pre>
+<table>
+  <tr><th>Step</th><th>Why</th></tr>
+  <tr><td>1. Verify the sender (shared secret or signature)</td><td>The URL is public; anyone could POST a fake bug</td></tr>
+  <tr><td>2. Claim the event key, atomically (<code>INSERT … ON CONFLICT DO NOTHING</code>, or a Firestore create)</td><td>Senders retry, so the same event can arrive twice. Only the request that wins the insert runs the agent. A check-then-write lets two near-simultaneous copies both pass</td></tr>
+  <tr><td>3. Return <code>200 OK</code> at once</td><td>The sender waits only briefly. A slow reply looks like a failure and triggers a retry</td></tr>
+  <tr><td>4. Run the agent in the background (e.g. Cloud Tasks)</td><td>The loop takes from 30 s to minutes: several model calls plus three MCP calls</td></tr>
+  <tr><td>5. Mark the event <code>done</code> (or <code>failed</code>)</td><td>Status separates a duplicate (skip) from a run that crashed halfway (retry)</td></tr>
+</table>
+<p>The key: a delivery ID if the sender provides one, else <code>issue key + event type</code> (<code>GAME-4812:issue_created</code>).
+Keep the record in a database, not in memory: Cloud Run runs several instances and restarts them.
+The name for this property is <b>idempotency</b>: processing an event twice has the same effect as processing it once.</p>
+</details>
+
+<h3>Example 3 · Level designer's in-editor assistant</h3>
+<p>A designer with a level open types: <i>“Place the lanterns from the night-market brief along the main street, then tick them off in the props sheet.”</i>
+The agent reads the brief, looks at the level, proposes placements, waits for the designer's OK, places the props and adds rows to the sheet.</p>
+<figure>
+<svg viewBox="0 0 640 420" width="100%" role="img" aria-label="On the designer's workstation, a desktop assistant is the host. It talks to the model over a chat API. Its first MCP client launches an Unreal MCP server as a stdio subprocess on the same workstation; that server drives a plugin inside the Unreal Editor over a local socket, which is not MCP. Its second MCP client leaves the workstation over Streamable HTTP with OAuth to a Google Workspace MCP server, which calls the Docs and Sheets APIs as the designer.">
+  <defs>
+    <marker id="b3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#1f5f8b"/></marker>
+    <marker id="k3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#1d1d1b"/></marker>
+    <marker id="g3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#999"/></marker>
+  </defs>
+  <!-- workstation boundary (L-shape: host + left column) -->
+  <path d="M4,106 H636 V264 H330 V412 H4 Z" fill="none" stroke="#999" stroke-dasharray="5 4"/>
+  <text x="12" y="405" font-size="10" font-style="italic" fill="#6b6b66">designer's workstation</text>
+  <text x="632" y="405" font-size="10" font-style="italic" fill="#6b6b66" text-anchor="end">Google's cloud</text>
+  <!-- model -->
+  <rect x="210" y="8" width="220" height="46" rx="5" fill="#f3f0e8" stroke="#1d1d1b"/>
+  <text x="320" y="28" font-size="13" text-anchor="middle" font-weight="600">Model</text>
+  <text x="320" y="44" font-size="10" text-anchor="middle" fill="#6b6b66">LLM provider · never sees a server</text>
+  <!-- chat api -->
+  <line x1="320" y1="56" x2="320" y2="114" stroke="#1d1d1b" stroke-width="1.6" marker-start="url(#k3)" marker-end="url(#k3)"/>
+  <text x="330" y="74" font-size="11" font-weight="600">chat API (not MCP)</text>
+  <text x="330" y="88" font-size="10" fill="#6b6b66">↓ request + tool schemas</text>
+  <text x="330" y="102" font-size="10" fill="#6b6b66">↑ tool call, or reply</text>
+  <!-- host -->
+  <rect x="10" y="116" width="620" height="140" rx="7" fill="none" stroke="#1d1d1b" stroke-width="1.4"/>
+  <text x="22" y="134" font-size="12" font-weight="600">Desktop assistant = HOST</text>
+  <text x="320" y="152" font-size="11" text-anchor="middle" fill="#6b6b66">designer · chat panel · history · agent loop · asks before every write call</text>
+  <line x1="170" y1="160" x2="170" y2="190" stroke="#1d1d1b" marker-start="url(#k3)" marker-end="url(#k3)"/>
+  <line x1="470" y1="160" x2="470" y2="190" stroke="#1d1d1b" marker-start="url(#k3)" marker-end="url(#k3)"/>
+  <text x="178" y="179" font-size="9" fill="#6b6b66">function call</text>
+  <text x="478" y="179" font-size="9" fill="#6b6b66">function call</text>
+  <rect x="90" y="192" width="160" height="44" rx="4" fill="#1f5f8b" fill-opacity="0.1" stroke="#1f5f8b"/>
+  <text x="170" y="219" font-size="12" text-anchor="middle">MCP client 1</text>
+  <rect x="390" y="192" width="160" height="44" rx="4" fill="#1f5f8b" fill-opacity="0.1" stroke="#1f5f8b"/>
+  <text x="470" y="219" font-size="12" text-anchor="middle">MCP client 2</text>
+  <!-- MCP -->
+  <line x1="170" y1="238" x2="170" y2="290" stroke="#1f5f8b" stroke-width="2.2" marker-start="url(#b3)" marker-end="url(#b3)"/>
+  <line x1="470" y1="238" x2="470" y2="290" stroke="#1f5f8b" stroke-width="2.2" marker-start="url(#b3)" marker-end="url(#b3)"/>
+  <text x="180" y="276" font-size="10" fill="#1f5f8b" font-weight="600">stdio · host launches it</text>
+  <text x="480" y="282" font-size="10" fill="#1f5f8b" font-weight="600">Streamable HTTP + OAuth</text>
+  <!-- servers -->
+  <rect x="80" y="292" width="180" height="44" rx="4" fill="#1f5f8b" fill-opacity="0.1" stroke="#1f5f8b"/>
+  <text x="170" y="310" font-size="12" text-anchor="middle">Unreal MCP server</text>
+  <text x="170" y="327" font-size="9" text-anchor="middle" fill="#6b6b66">list_actors · spawn_actor · set_transform</text>
+  <rect x="380" y="292" width="180" height="44" rx="4" fill="#1f5f8b" fill-opacity="0.1" stroke="#1f5f8b"/>
+  <text x="470" y="310" font-size="11" text-anchor="middle">Google Workspace MCP server</text>
+  <text x="470" y="327" font-size="9" text-anchor="middle" fill="#6b6b66">read_doc · append_row</text>
+  <!-- backends -->
+  <line x1="170" y1="338" x2="170" y2="366" stroke="#999" marker-end="url(#g3)"/>
+  <line x1="470" y1="338" x2="470" y2="366" stroke="#999" marker-end="url(#g3)"/>
+  <text x="180" y="356" font-size="9" fill="#999">local socket (not MCP)</text>
+  <text x="480" y="356" font-size="9" fill="#999">Docs/Sheets APIs, as the designer</text>
+  <text x="170" y="386" font-size="12" text-anchor="middle" fill="#6b6b66">Unreal Editor plugin (open level)</text>
+  <text x="470" y="386" font-size="12" text-anchor="middle" fill="#6b6b66">Google Docs · Sheets</text>
+</svg>
+<figcaption>Path: designer ⇄ host ⇄ model, then host ⇄ client ⇄ server, twice. The dashed line marks the workstation: the Unreal leg never leaves it,
+the Workspace leg does. The host could be a desktop chat app or a panel inside the editor; the shape is the same.</figcaption>
+</figure>
+<p>What this adds to Examples 1 and 2:</p>
+<ul>
+  <li><b>The server is an adapter, not the engine.</b> The editor does not speak MCP. The server turns each <code>tools/call</code> into a command for an editor plugin, sent over a local socket.</li>
+  <li><b>stdio puts the server on the designer's machine.</b> The host starts it as a subprocess, so the MCP leg opens no network port and needs no auth. The plugin's socket is a port, though: bind it to localhost.</li>
+  <li><b>Writes change a live level, so the host asks first.</b> The host shows each <code>spawn_actor</code> to the designer for approval and runs read-only calls without asking. Annotations such as <code>readOnlyHint</code> and <code>destructiveHint</code> can drive that split, but they come from the server, so rely on them only if you trust the server.</li>
+  <li><b>OAuth as the designer, not a bot.</b> The agent can open only what the designer can, and edits are logged under the designer's name. It can also do anything the designer can, so request the narrowest scopes (read-only for Docs).</li>
+  <li><b>Plan for undo.</b> If the plugin wraps each edit in an editor transaction, Ctrl+Z reverts the agent's change like a manual edit.</li>
+</ul>
 
 <h2>The two tool messages</h2>
 <table>
