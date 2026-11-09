@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reference · ADK cheat sheet</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<main>
+
+<p class="kicker">Reference · <span class="tag adk">ADK</span> · checked against google-adk 2.13.0, toolbox-core 1.4.0</p>
+<h1>ADK cheat sheet</h1>
+<p class="subtitle">Agent, Runner, session, events, and how Toolbox tools get in. Taught in
+<a href="../lessons/0002-adk-the-runner-is-your-loop.html">lesson 0002</a>.</p>
+
+<h2>The four pieces</h2>
+<table>
+  <tr><th>Piece</th><th>Is</th><th>Module 1 equivalent</th></tr>
+  <tr><td><code>LlmAgent</code> (alias <code>Agent</code>)</td><td>Definition: <code>name</code>, <code>model</code>, <code>instruction</code>, <code>tools</code></td><td><code>model=</code>, system prompt, <code>TOOLS</code></td></tr>
+  <tr><td><code>InMemorySessionService</code></td><td>Holds sessions; one session = one conversation thread; lost on restart</td><td><code>messages</code></td></tr>
+  <tr><td><code>Runner</code></td><td>Drives the loop for one invocation: model → tools → session → model</td><td><code>while True:</code></td></tr>
+  <tr><td><code>Event</code></td><td>One step of the loop, yielded by <code>run_async</code></td><td><code>print(response…)</code></td></tr>
+</table>
+<p><a href="https://adk.dev/agents/llm-agents/">LlmAgent</a> ·
+<a href="https://adk.dev/runtime/event-loop/">event loop</a> ·
+<a href="https://adk.dev/sessions/session/">session</a> ·
+<a href="https://adk.dev/events/">events</a></p>
+
+<h2>Skeleton</h2>
+<pre><code>from google.adk.agents import LlmAgent
+from google.adk.runners import Runner
+from google.adk.sessions import InMemorySessionService
+from google.genai import types
+
+agent    = LlmAgent(name="…", model="gemini-2.5-flash", instruction="…", tools=[…])
+sessions = InMemorySessionService()
+runner   = Runner(app_name="app", agent=agent, session_service=sessions)
+
+s   = await sessions.create_session(app_name="app", user_id=uid)     # async!
+msg = types.Content(role="user", parts=[types.Part(text=text)])
+async for event in runner.run_async(user_id=uid, session_id=s.id, new_message=msg):
+    ...</code></pre>
+
+<h2>Reading events</h2>
+<table>
+  <tr><th>Test</th><th>Means</th><th>Read</th></tr>
+  <tr><td><code>event.get_function_calls()</code> non-empty</td><td>Model asks for tool(s)</td><td><code>.name</code>, <code>.args</code></td></tr>
+  <tr><td><code>event.get_function_responses()</code> non-empty</td><td>Tool result(s)</td><td><code>.name</code>, <code>.response</code></td></tr>
+  <tr><td><code>event.is_final_response()</code></td><td>User-facing answer <b>or an error</b></td><td>check <code>event.error_code</code>, then <code>event.content.parts[0].text</code></td></tr>
+  <tr><td><code>event.usage_metadata</code></td><td>Token counts on model events</td><td>not in the Events docs; a field in 2.13.0</td></tr>
+  <tr><td><code>event.partial</code></td><td>Incomplete streaming chunk</td><td>skip for final text</td></tr>
+</table>
+
+<h2>Tools</h2>
+<ul>
+  <li>A plain function in <code>tools=[…]</code> is wrapped as a <code>FunctionTool</code>; its signature + docstring become the schema.
+  Type hint and no default = required. <a href="https://adk.dev/tools-custom/function-tools/">function tools</a></li>
+  <li><code>toolbox-core</code>: <code>await ToolboxClient(url).load_toolset(name, bound_params={…})</code> returns callables ADK wraps directly.
+  A bound parameter is removed from the signature and docstring, so it's absent from the model's schema; the value is added to every call.</li>
+  <li>ADK's docs use <code>ToolboxToolset</code> from <code>toolbox-adk</code> (<code>pip install google-adk[toolbox]</code>), same idea.
+  <a href="https://adk.dev/integrations/mcp-toolbox-for-databases/">ADK + Toolbox</a></li>
+</ul>
+
+<h2>Gotchas</h2>
+<ul>
+  <li><code>create_session</code> is a coroutine: forget <code>await</code> and you get a coroutine object, not a session.</li>
+  <li><code>run_async</code> on a missing session raises <code>SessionNotFoundError</code> (unless <code>Runner(auto_create_session=True)</code>).</li>
+  <li>Toolbox results arrive as <code>{"result": "&lt;JSON string&gt;"}</code>. <code>"[]"</code> is truthy. Decode before testing.</li>
+  <li>Peek at the exact model-visible schema: <code>FunctionTool(tool)._get_declaration()</code> (private; debugging only).</li>
+</ul>
+
+<div class="nav">
+  <a href="mcp-cheatsheet.html">← MCP cheat sheet</a>
+  <a href="../lessons/0002-adk-the-runner-is-your-loop.html">Lesson 0002</a>
+  <span></span>
+</div>
+
+</main>
+</body>
+</html>

@@ -25,8 +25,19 @@
   Condensed v1.0 summary.
 
 ### ADK
-- [ADK docs](https://adk.dev/)
-  Google's Agent Development Kit: `LlmAgent`, workflow agents, `Runner`, sessions, events. Use for: Stage 3, 4 and 7. *(Pages not yet read. Verify before the ADK lesson.)*
+- [ADK: Runtime Event Loop](https://adk.dev/runtime/event-loop/)
+  The `Runner` as "central coordinator for a single user invocation"; `run_async` is the main entry point; the agent pauses after each `yield`. Use for: what the Runner does (lesson 0002's primary source).
+- [ADK: Simple agents with LlmAgent](https://adk.dev/agents/llm-agents/)
+  `LlmAgent` (alias `Agent`): `model` (required), `instruction`, `description`, `tools`. Use for: Stage 3's agent.
+- [ADK: Session](https://adk.dev/sessions/session/)
+  One session = one conversation thread (`id`, `userId`); `InMemorySessionService` loses everything on restart; `create_session` is awaited; missing session → `SessionNotFoundError` unless `auto_create_session=True`.
+- [ADK: Events](https://adk.dev/events/)
+  `author`, `content`, `partial`, `get_function_calls()`, `get_function_responses()`, `is_final_response()`. Does **not** document `usage_metadata` (a field in the 2.13.0 source). Use for: Stage 4's renderer.
+- [ADK: Function tools](https://adk.dev/tools-custom/function-tools/)
+  A function in `tools` is wrapped as a `FunctionTool`; signature + docstring become the schema; type hint without default = required.
+- [ADK: MCP Toolbox for Databases](https://adk.dev/integrations/mcp-toolbox-for-databases/)
+  Uses `ToolboxToolset` from `toolbox-adk`; bound params "are hidden from the model". The build env has `toolbox-core` 1.4.0 instead, whose callables ADK wraps directly.
+- Installed source (conda env `customer-support`: google-adk 2.13.0, toolbox-core 1.4.0) beats docs when they differ. Verified there: `Event.is_final_response()` is also true for error events; `load_toolset(strict=True)` raises if a bound param goes unused by any tool.
 - [ADK + Phoenix integration](https://adk.dev/integrations/phoenix/)
   OpenInference instrumentation for ADK into Phoenix. Use for: Stage 5.
 
@@ -42,5 +53,6 @@
 - The cohort itself: compare `DESIGN.md` decisions with classmates. Two people who chose differently is the best feedback there is.
 
 ## Gaps
-- A2A and ADK primary docs not yet read in depth. Read them before lessons 3 and 4.
+- A2A primary docs not yet read in depth. Read them before lesson 0004. (ADK pages read 2026-11-07 for lesson 0002.)
+- ADK Python API reference (https://adk.dev/api-reference/python/) not read; the docs pages show no Python `Runner(...)` example, so constructor args were taken from the installed source.
 - (resolved 2026-11-07) `--enable-api` exists in Toolbox 1.16.0 (`--help`); also `toolbox invoke` runs a tool directly. Use `--allowed-hosts`/`--allowed-origins` to silence the DNS-rebinding warnings.

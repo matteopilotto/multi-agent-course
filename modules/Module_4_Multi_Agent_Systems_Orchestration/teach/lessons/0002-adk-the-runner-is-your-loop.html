@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0002 · ADK: the Runner is your loop</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<main>
+
+<p class="kicker">Module 4 · Lesson 0002 · ~20 min · before Assignment 3, Stages 3–4</p>
+<h1>ADK: the Runner is your loop</h1>
+<p class="subtitle">You already wrote an agent loop by hand in Module 1. ADK gives each part of it a name, and runs it for you.</p>
+
+<div class="goal">
+  <p class="label">The one win</p>
+  <p>By the end you will have <b>printed exactly what Gemini sees</b> of your three Toolbox tools once the
+  logged-in email is bound, and you'll know whether M-5 really holds in your build.</p>
+</div>
+
+<h2>0 · From memory first</h2>
+<p>Two questions from lesson 0001. Answer them out loud before you open them.</p>
+<details><summary>In your build, which process is the MCP host, which is the client, and which is the server?</summary>
+  <p>Host: the process running your pipeline and the ADK agent. Client: <code>toolbox-core</code>'s <code>ToolboxClient</code> inside it.
+  Server: Toolbox on <code>:5050</code>. Postgres is behind the server and never speaks MCP.</p>
+</details>
+<details><summary>By default, who fills in a tool call's <code>arguments</code>? So what did you decide about the email?</summary>
+  <p>The model fills them in, from the schema. You decided the email must not be one of them: the host binds it from the login,
+  and the model never sees it (your learning record 0004). This lesson checks that it actually happens.</p>
+</details>
+
+<h2>1 · Your Module 1 loop, renamed</h2>
+
+<p>Here's the core of your <code>agent_loop.py</code>, next to what ADK calls each part:</p>
+
+<table>
+  <tr><th>Your Module 1 code</th><th>ADK</th><th>Role</th></tr>
+  <tr><td><code>model=…</code>, the system prompt, <code>tools=TOOLS</code></td><td><code>LlmAgent(model, instruction, tools)</code></td><td>The <em>definition</em>: what the agent is</td></tr>
+  <tr><td><code>messages = [...]</code></td><td>A <b>session</b> in an <code>InMemorySessionService</code></td><td>The conversation's memory</td></tr>
+  <tr><td><code>while True:</code> create, <code>invoke_tools</code>, append</td><td><code>runner.run_async(...)</code></td><td>The <em>loop</em>: the host's job</td></tr>
+  <tr><td><code>print(response.content)</code></td><td>The <b>events</b> <code>run_async</code> yields</td><td>What you get to watch</td></tr>
+  <tr><td><code>if stop_reason == "end_turn": break</code></td><td><code>event.is_final_response()</code></td><td>“The answer is ready”</td></tr>
+</table>
+
+<p class="note">“The <code>Runner</code> acts as the central coordinator for a single user invocation.”
+“<code>Runner.run_async</code> is the primary method for executing agent invocations.”
+<a href="https://adk.dev/runtime/event-loop/">ADK: Runtime Event Loop</a></p>
+
+<p>Your recorded weak spot is “who acts vs. who decides”, so read the table that way. The <b>model decides</b> which tool to call.
+The <b>Runner acts</b>: it calls the model, runs the tool, saves the result in the session and calls the model again.
+The <code>LlmAgent</code> doesn't do anything by itself. It's a description that the Runner reads.</p>
+
+<h2>2 · The four pieces in code</h2>
+
+<p>A toy agent, not your shop. The tool is a plain Python function:</p>
+
+<pre><code>from google.adk.agents import LlmAgent
+from google.adk.runners import Runner
+from google.adk.sessions import InMemorySessionService
+from google.genai import types
+
+def get_capital_city(country: str) -> str:
+    """Retrieves the capital city for a given country."""
+    return {"france": "Paris"}.get(country.lower(), "unknown")
+
+agent = LlmAgent(name="capital_agent", model="gemini-2.5-flash",
+                 instruction="Answer questions about capitals. Use the tool.",
+                 tools=[get_capital_city])            # definition
+
+sessions = InMemorySessionService()
+runner = Runner(app_name="demo", agent=agent, session_service=sessions)
+
+async def main():
+    s = <span class="hl">await</span> sessions.create_session(app_name="demo", user_id="alice")
+    msg = types.Content(role="user", parts=[types.Part(text="Capital of France?")])
+    async for event in runner.run_async(user_id="alice", session_id=s.id, new_message=msg):
+        ...                                          # section 3</code></pre>
+
+<p class="note">The function and its docstring are the example on
+<a href="https://adk.dev/agents/llm-agents/">ADK: LlmAgent</a>. Signatures were checked against the installed
+<code>google-adk 2.13.0</code>; <code>create_session</code> is a coroutine, so it needs <code>await</code>.</p>
+
+<p>Three things to notice:</p>
+<ul>
+  <li><b>The function <em>is</em> the tool.</b> ADK reads its signature and docstring and builds the schema the model sees.
+  A parameter with a type hint and no default value is required.</li>
+  <li><b>A session is one conversation thread</b>, keyed by <code>user_id</code> + <code>session_id</code>. In memory, it's
+  gone when the process stops. If you call <code>run_async</code> on a session that doesn't exist, you get an error, not a new session.</li>
+  <li><b>You never call Gemini yourself.</b> You hand the Runner a message and read what comes out.</li>
+</ul>
+
+<p class="note">“When you assign a function to an agent's <code>tools</code> list, the framework automatically wraps it as a
+<code>FunctionTool</code>.” <a href="https://adk.dev/tools-custom/function-tools/">ADK: Function tools</a>.
+“A <code>Session</code> represents a single conversation thread” and in-memory storage keeps “None. All conversation data is lost if the
+application restarts.” <a href="https://adk.dev/sessions/session/">ADK: Session</a></p>
+
+<h2>3 · What comes out: events</h2>
+
+<p>Every step of the loop comes out of <code>run_async</code> as an <code>Event</code>. For Stage 4 you need to tell them apart:</p>
+
+<table>
+  <tr><th>The event is…</th><th>How you can tell</th><th>What to read</th></tr>
+  <tr><td>The model asking for a tool</td><td><code>event.get_function_calls()</code> is not empty</td><td><code>call.name</code>, <code>call.args</code></td></tr>
+  <tr><td>A tool's result</td><td><code>event.get_function_responses()</code> is not empty</td><td><code>resp.name</code>, <code>resp.response</code></td></tr>
+  <tr><td>The answer for the user</td><td><code>event.is_final_response()</code></td><td><code>event.content.parts[0].text</code></td></tr>
+  <tr><td>(any model event)</td><td><code>event.usage_metadata</code> is set</td><td>token counts for SPEC §7.1's <code>llm</code> event</td></tr>
+</table>
+
+<p class="note">Rows 1–3 come from <a href="https://adk.dev/events/">ADK: Events</a>. <code>usage_metadata</code> isn't on that page.
+It's a field of <code>Event</code> in the installed 2.13.0 source, so confirm what it contains on a real run.</p>
+
+<div class="task">
+  <p class="label">Predict</p>
+  <p>Alice asks the toy agent “Capital of France?”. Write down the events you expect, in order, with the row of the table each one matches.</p>
+</div>
+<details><summary>Reveal</summary>
+  <ol>
+    <li>A function call: <code>get_capital_city</code>, <code>{"country": "France"}</code>. <em>The model decided.</em></li>
+    <li>A function response carrying <code>"Paris"</code>. <em>The Runner acted: it ran your function.</em> (Print <code>resp.response</code> on a real run to see its exact shape.)</li>
+    <li>A final response: “The capital of France is Paris.”</li>
+  </ol>
+  <p>That's the same three steps your Module 1 loop printed: <code>tool_use</code>, your <code>tool_result</code>, then <code>end_turn</code>.</p>
+</details>
+
+<div class="callout warn">
+  <p class="label">Fail loud, again</p>
+  <p>In 2.13.0, <code>is_final_response()</code> is <b>also true for an error event</b> (one with <code>error_code</code> set).
+  If you print “the final text” without checking for that first, a failed turn looks like a normal answer, maybe an empty one.
+  That's SPEC R-4 at the event level. (Read in the installed source of <code>Event.is_final_response</code>.)</p>
+</div>
+
+<h2>4 · How the email disappears</h2>
+
+<p>Your agent's tools aren't Python functions you wrote. <code>toolbox-core</code> builds them from <code>tools.yaml</code>.
+The chain from config to model:</p>
+
+<pre><code>tools.yaml  →  load_toolset(bound_params=…)  →  a Python callable  →  ADK FunctionTool  →  schema sent to Gemini
+ (server)        (client, inside your host)      (signature + doc)    (reads signature)     (what the model sees)</code></pre>
+
+<p>A bound parameter is removed at the third step: <code>toolbox-core</code> takes it out of the callable's signature and docstring
+and adds the value itself on every <code>tools/call</code>. ADK never learns it existed.</p>
+
+<p class="note">ADK's own Toolbox page: bound values “are hidden from the model.”
+<a href="https://adk.dev/integrations/mcp-toolbox-for-databases/">ADK: MCP Toolbox for Databases</a>. That page uses a
+<code>ToolboxToolset</code> from the <code>toolbox-adk</code> package; your env has <code>toolbox-core</code> 1.4.0, whose callables
+ADK wraps directly. Same idea, one layer fewer.</p>
+
+<div class="task">
+  <p class="label">Your win: look at what Gemini sees (~5 min)</p>
+  <p>With <code>./run.sh toolbox</code> running, save this <b>outside</b> the repo (e.g. <code>/tmp/peek.py</code>) and run it in the
+  <code>customer-support</code> env:</p>
+<pre><code>import asyncio
+from toolbox_core import ToolboxClient
+from google.adk.tools import FunctionTool
+
+async def main():
+    async with ToolboxClient("http://127.0.0.1:5050") as client:
+        tools = await client.load_toolset(
+            "support-agent",
+            bound_params={"customer_email": "alice.jones@example.com"})
+        for tool in tools:
+            decl = FunctionTool(tool)._get_declaration()   # private: a peek, not app code
+            props = (decl.parameters_json_schema or {}).get("properties", {})
+            print(decl.name, "->", list(props))
+
+asyncio.run(main())</code></pre>
+  <p><b>Before you run it</b>, write down which parameters you expect each of your three tools to show.
+  Then run it and compare. Then run it once more with <code>bound_params={}</code>.</p>
+  <p>The question to answer: <b>is there any email left that the model could fill in?</b> If there is,
+  what could Alice type to get it used, and which SPEC id does that break?</p>
+</div>
+<details><summary>Hint (only if the output looks fine to you)</summary>
+  <p>Read the output for <em>all three</em> tools, not just the two that read orders. Then open <code>mcp_toolbox/tools.yaml</code>
+  and compare every parameter <code>name:</code> with the key you bound.</p>
+</details>
+
+<h2>5 · Retrieval check</h2>
+<p>From memory. Your first click is the one that counts.</p>
+
+<div class="quiz">
+  <div class="q">
+    <p class="prompt">In ADK, which object plays the part of your Module 1 <code>while True:</code> loop?</p>
+    <button class="opt">The LlmAgent holding model and tools</button>
+    <button class="opt" data-ok>The Runner driving one user invocation</button>
+    <button class="opt">The session service storing every event</button>
+    <button class="opt">The Gemini model deciding each step</button>
+    <p class="why">The Runner calls the model, runs the tools, saves events to the session and loops. The <code>LlmAgent</code> is only the
+    description it reads, and the model only decides.</p>
+  </div>
+
+  <div class="q">
+    <p class="prompt">Alice and Bob are both logged in. How many sessions does Stage 3 ask for?</p>
+    <button class="opt">One shared session for the whole app</button>
+    <button class="opt">One new session for every single message</button>
+    <button class="opt">One session for each tool call made</button>
+    <button class="opt" data-ok>One session for each logged-in user account</button>
+    <p class="why">A session is one conversation thread, so each user gets one, created at login. A shared one would put Alice's
+    turns into Bob's context.</p>
+  </div>
+
+  <div class="q">
+    <p class="prompt">An event's <code>get_function_calls()</code> is not empty. What is happening?</p>
+    <button class="opt" data-ok>The model is asking for a tool</button>
+    <button class="opt">The tool has finished and returned rows</button>
+    <button class="opt">The agent produced its final user answer</button>
+    <button class="opt">The session was saved to the service</button>
+    <p class="why">A function call is the model's request. The tool's output arrives later, in a separate event that has
+    <code>get_function_responses()</code> set.</p>
+  </div>
+
+  <div class="q">
+    <p class="prompt">A tool has a <code>customer_email</code> parameter, and you bind it. Where does the value go?</p>
+    <button class="opt">Into the schema so Gemini can check it</button>
+    <button class="opt">Into the instruction so Gemini will remember it</button>
+    <button class="opt" data-ok>Into every call, hidden from the model's schema</button>
+    <button class="opt">Into the session state for the next turn</button>
+    <p class="why"><code>toolbox-core</code> drops it from the signature that ADK reads, and adds the value to each <code>tools/call</code> itself.
+    The model can't fill in a field it never sees.</p>
+  </div>
+
+  <div class="q">
+    <p class="prompt">Toolbox returns <code>{"result": "[]"}</code> for order 5. In Python, <code>if data["result"]:</code> evaluates to…</p>
+    <button class="opt">False, because the list inside is empty</button>
+    <button class="opt">An error, because result is not JSON</button>
+    <button class="opt">None, because Toolbox returns no rows here</button>
+    <button class="opt" data-ok>True, because a non-empty string is truthy</button>
+    <p class="why">You saw this in Stage 2. <code>"[]"</code> is a two-character string, not a list. Decode it with <code>json.loads</code>
+    first. Stage 4 has you unwrap it before emitting <code>tool_result</code>.</p>
+  </div>
+
+  <div class="q">
+    <p class="prompt"><code>is_final_response()</code> is true. Is it safe to print the text as the answer?</p>
+    <button class="opt">Yes, it always holds the model's text</button>
+    <button class="opt" data-ok>No, an error event can also qualify</button>
+    <button class="opt">Yes, ADK filters out errors before yielding</button>
+    <button class="opt">No, final events never carry any text</button>
+    <p class="why">An event with <code>error_code</code> set also counts as final. Check for it, and turn it into an <code>error</code>
+    event (SPEC §7.1) rather than a reply.</p>
+  </div>
+</div>
+
+<h2>6 · Now build: Stage 3</h2>
+
+<p>Open <a href="../../Assignment_3_Customer_Support/TECHNICAL.md">TECHNICAL.md §4, Stage 3</a>. One thing first:
+the agent needs a Gemini key. Is <code>GOOGLE_API_KEY</code> in your <code>.env</code> yet?</p>
+
+<div class="task">
+  <p class="label">Stage 3's decisions, in your words</p>
+  <p>You've already reasoned out most of the <em>You decide</em>. Now say it with what <code>peek.py</code> showed you:
+  <b>which tools does the agent get, and how does the session's email reach <em>every one</em> of them without the model choosing it?</b></p>
+  <p>Then one you haven't faced yet. The CLI logs in against <code>users</code>, but your <code>shop_tools</code> role has no grant on that table
+  (<code>db/seed.sql</code> says so). <b>Who should read <code>users</code>, and as which Postgres role? Should the agent's tools be able to?</b></p>
+  <p>Write both in <code>BUILD_LOG.md</code>, then bring them to me.</p>
+</div>
+
+<h2>Read next</h2>
+<p><b>Primary source:</b> <a href="https://adk.dev/runtime/event-loop/">ADK: Runtime Event Loop</a> (about 15 min). It's this
+lesson's table told from the Runner's side, including why the agent pauses after each <code>yield</code>.
+Before Stage 4, skim <a href="https://adk.dev/events/">ADK: Events</a>; its “identifying event types” section is your renderer's spec.</p>
+
+<p class="ask">Anything unclear: why <code>run_async</code> is a generator, what happens to a session on restart, how
+<code>SequentialAgent</code> differs from your pipeline, or what <code>peek.py</code> printed?
+<b>Ask me in Claude Code.</b> I'm your tutor for this, and asking is the fastest way through.</p>
+
+<div class="nav">
+  <a href="0001-mcp-what-crosses-the-wire.html">← 0001 · MCP: what crosses the wire</a>
+  <a href="../reference/adk-cheatsheet.html">ADK cheat sheet →</a>
+  <span>Next: 0003 · Tracing (after Stage 4)</span>
+</div>
+
+</main>
+<script src="../assets/quiz.js"></script>
+</body>
+</html>
